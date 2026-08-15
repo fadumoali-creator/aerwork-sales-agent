@@ -1,0 +1,9 @@
+{
+  "name": "aerwork-linkedin-agent",
+  "private": true,
+  "version": "1.0.0",
+  "description": "AerWork LinkedIn Sales Agent - Netlify Function backend",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
