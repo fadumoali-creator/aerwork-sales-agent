@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AerWork LinkedIn Agentti</title>
+<title>LinkedIn Agent — AerWork</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCA0MCA0MCc+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSdnJyB4MT0nMCcgeTE9JzAnIHgyPSc0MCcgeTI9JzQwJyBncmFkaWVudFVuaXRzPSd1c2VyU3BhY2VPblVzZSc+PHN0b3Agc3RvcC1jb2xvcj0nIzJFNkY2RScvPjxzdG9wIG9mZnNldD0nMScgc3RvcC1jb2xvcj0nIzFGMkQ1MCcvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxjaXJjbGUgY3g9JzIwJyBjeT0nMjAnIHI9JzIwJyBmaWxsPSd1cmwoI2cpJy8+PGcgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnPjxsaW5lIHgxPScxMycgeTE9JzI3JyB4Mj0nMjAnIHkyPScxMycvPjxsaW5lIHgxPScyMCcgeTE9JzEzJyB4Mj0nMjgnIHkyPScyNScvPjxsaW5lIHgxPScxMycgeTE9JzI3JyB4Mj0nMjgnIHkyPScyNScvPjwvZz48Y2lyY2xlIGN4PScxMycgY3k9JzI3JyByPSczLjQnIGZpbGw9J3doaXRlJy8+PGNpcmNsZSBjeD0nMjAnIGN5PScxMycgcj0nMy40JyBmaWxsPSd3aGl0ZScvPjxjaXJjbGUgY3g9JzI4JyBjeT0nMjUnIHI9JzMuNCcgZmlsbD0nd2hpdGUnLz48L3N2Zz4K">
 <style>
   :root{
     --navy:#1F2D50;
@@ -56,11 +57,17 @@
     background:var(--panel); border-bottom:1px solid var(--border); flex-shrink:0;
   }
   .avatar{
-    width:38px; height:38px; border-radius:50%; background:linear-gradient(135deg,var(--teal),var(--navy));
+    width:42px; height:42px; border-radius:50%; background:linear-gradient(135deg,var(--teal),var(--navy));
     display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:15px; flex-shrink:0;
+    box-shadow:0 2px 6px rgba(31,45,80,.25);
   }
+  .avatar svg{width:58%; height:58%; display:block;}
   header .titles{flex:1;}
-  header h1{margin:0; font-size:16px; color:var(--navy);}
+  header .header-eyebrow{
+    font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--teal);
+    font-weight:700; margin-bottom:1px;
+  }
+  header h1{margin:0; font-size:17px; color:var(--navy);}
   header .status-line{margin:1px 0 0; font-size:12px; color:var(--muted);}
   header .status-dot{display:inline-block; width:7px; height:7px; border-radius:50%; background:#bbb; margin-right:5px;}
   header .status-dot.live{background:#2fae5c;}
@@ -93,8 +100,9 @@
   .msg.user{flex-direction:row-reverse;}
   .msg .bubble-avatar{
     width:28px; height:28px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
-    font-size:12px; font-weight:800; color:#fff;
+    font-size:12px; font-weight:800; color:#fff; box-shadow:0 1px 3px rgba(31,45,80,.2);
   }
+  .msg .bubble-avatar svg{width:60%; height:60%; display:block;}
   .msg.assistant .bubble-avatar{background:linear-gradient(135deg,var(--teal),var(--navy));}
   .msg.user .bubble-avatar{background:#9aa2b1;}
   .bubble{
@@ -204,9 +212,10 @@
   </div>
 
   <header>
-    <div class="avatar">AW</div>
+    <div class="avatar"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><g stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.95"><line x1="13" y1="27" x2="20" y2="13"/><line x1="20" y1="13" x2="28" y2="25"/><line x1="13" y1="27" x2="28" y2="25"/></g><circle cx="13" cy="27" r="3.4" fill="#fff"/><circle cx="20" cy="13" r="3.4" fill="#fff"/><circle cx="28" cy="25" r="3.4" fill="#fff"/></svg></div>
     <div class="titles">
-      <h1>AerWork LinkedIn Agentti</h1>
+      <div class="header-eyebrow">AerWork</div>
+      <h1>LinkedIn Agent</h1>
       <p class="status-line"><span class="status-dot live" id="statusDot"></span><span id="statusText">Valmis keskustelemaan — hakee tietoa webistä ja PRH:sta</span></p>
     </div>
   </header>
@@ -216,7 +225,7 @@
       <div class="greeting" id="greeting">
         <div class="banner">
           <div class="eyebrow">AerWork · Sales Agent</div>
-          <h2>LinkedIn-myyntiprosessin assistentti</h2>
+          <h2>LinkedIn Agent — LinkedIn-myyntiprosessin assistentti</h2>
         </div>
         <div class="body">
           <p>Käyn puolestasi läpi liidin pisteytyksen, taustatutkimuksen ja viestiluonnokset — sekä tulkitsen saamasi vastaukset. Kaikki tuotokset ovat luonnoksia; en koskaan lähetä mitään itse LinkedIniin. Valitse aloitustoiminto, tai kirjoita suoraan alla olevaan kenttään.</p>
@@ -392,12 +401,14 @@ function renderAssistantContent(text){
   return frag;
 }
 
+const AGENT_AVATAR_SVG = '<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><g stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.95"><line x1="13" y1="27" x2="20" y2="13"/><line x1="20" y1="13" x2="28" y2="25"/><line x1="13" y1="27" x2="28" y2="25"/></g><circle cx="13" cy="27" r="3.4" fill="#fff"/><circle cx="20" cy="13" r="3.4" fill="#fff"/><circle cx="28" cy="25" r="3.4" fill="#fff"/></svg>';
+
 function addMessage(role, text){
   const row = document.createElement('div');
   row.className = 'msg ' + role;
   const av = document.createElement('div');
   av.className = 'bubble-avatar';
-  av.textContent = role === 'user' ? 'F' : 'AW';
+  if (role === 'user'){ av.textContent = 'F'; } else { av.innerHTML = AGENT_AVATAR_SVG; }
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   if (role === 'assistant'){
@@ -418,7 +429,7 @@ function addTyping(){
   row.id = 'typingRow';
   const av = document.createElement('div');
   av.className = 'bubble-avatar';
-  av.textContent = 'AW';
+  av.innerHTML = AGENT_AVATAR_SVG;
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
