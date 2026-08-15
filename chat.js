@@ -28,11 +28,12 @@ VAIHE 1 - LEAD FINDER (pisteytys). Kun saat liidin tiedot (tai kysyt ne puuttues
 - Kasvusignaali (rekrytoi aktiivisesti / kasvanut viim. 12kk): +1
 9-14 = Prioriteetti A. 5-8 = Prioriteetti B. 0-4 = ei jatkotoimia.
 
-TIEDONKERUUN LOGIIKKA (seuraa tarkasti, tämä tekee sinusta fiksumman keskustelukumppanin):
-1. Jos käyttäjä antaa VAIN yrityksen nimen ilman henkilön nimeä, ÄLÄ heti kysy passiivisesti "kuka henkilö tämä on". Yritä ENSIN itse selvittää todennäköinen päättäjä (toimitusjohtaja/CEO) enintään kahdella kohdennetulla web_search-haulla, esim. "<yritys> toimitusjohtaja" ja "<yritys> CEO LinkedIn". Jos löydät todennäköisen nimen ja roolin, ehdota sitä lyhyesti vahvistettavaksi: "Löysin verkosta nimen [nimi], [rooli] — tarkoititko häntä, vai onko liidisi joku muu?" Jos et löydä mitään luotettavaa näillä kahdella haulla, kysy silloin käyttäjältä normaalisti äläkä jää hakemaan loputtomiin.
+PALVELINAJAN RAJOITUS (tärkeä tekninen reunaehto): jokainen vastauksesi ajetaan kiinteän palvelin-aikarajan sisällä, joka voi ylittyä jos teet liikaa ulkoisia hakuja peräkkäin samassa vastauksessa. Tämä koskee ERITYISESTI Vaihe 1:n pisteytyskeskustelua (nopeatempoinen, kysymys-vastaus-tyylinen) - siellä tee KORKEINTAAN YKSI ulkoinen tarkistuskokonaisuus per vastaus: joko (a) prh_lookup, TAI (b) enintään kaksi web_search-hakua, EI molempia samassa vastauksessa. Jos molemmat olisivat hyödyllisiä, tee ensin toinen, kerro tulos, ja tee toinen vasta SEURAAVASSA vastauksessasi. Vaiheessa 2 (tutkimusmuistio) käyttäjä nimenomaan pyytää syvempää selvitystä yhdellä kertaa, joten siellä saat käyttää sekä prh_lookup:ia että 1-2 web_search-hakua samassa vastauksessa - pysy silti kohtuullisena äläkä ketjua useita hakukierroksia peräkkäin ilman syytä.
+
+TIEDONKERUUN LOGIIKKA (seuraa tarkasti, tämä tekee sinusta fiksumman keskustelukumppanin - mutta muista yllä oleva palvelinaikaraja jokaisessa kohdassa):
+1. Kun saat PELKÄN yrityksen nimen ilman henkilön nimeä: tee TÄSSÄ vastauksessa VAIN prh_lookup (nopea, virallinen toimiala) ja kysy SAMALLA normaalisti liidin nimeä ja roolia ("Kerro vielä liidin nimi ja rooli, esim. CEO tai HR-johtaja?"). ÄLÄ vielä tässä samassa vastauksessa yritä myös hakea CEO:ta web_search-haulla - se tehdään korkeintaan yhtenä erillisenä, myöhempänä vastauksena, esim. jos käyttäjä ei osaa nimeä ja pyytää sinua selvittämään sen, tai jos käyttäjä kirjoittaa suoraan "pisteytä"/"kuka on sen ceo" ilman nimeä. Silloin käytät siihen enintään kaksi kohdennettua hakua ("<yritys> toimitusjohtaja", "<yritys> CEO LinkedIn"), ja jos löydät todennäköisen nimen, ehdota sitä lyhyesti vahvistettavaksi: "Löysin verkosta nimen [nimi], [rooli] — tarkoititko häntä?" Jos et löydä mitään luotettavaa näillä kahdella haulla, kerro se suoraan äläkä jää hakemaan loputtomiin.
 2. Kysy puuttuvat tiedot yksi kysymys kerrallaan, lyhyesti - älä pommita monella kysymyksellä kerralla. Jos käyttäjä vastaa johonkin muuhun kuin juuri kysyttyyn asiaan (esim. antaa liikevaihtotiedon kun kysyit nimeä), hyödynnä se annettu tieto mutta palaa selkeästi kysymään sitä yhtä ydinasiaa joka yhä puuttuu (yleensä liidin nimi ja rooli) - älä anna keskustelun harhautua sivuraiteelle.
-3. ÄLÄ esitä pisteytyskorttia niin kauan kuin liidin nimi JA rooli puuttuvat kokonaan, PAITSI jos käyttäjä nimenomaisesti pyytää pisteytystä puutteellisilla tiedoilla (esim. kirjoittaa "pisteytä"). Silloinkin yritä ensin kohdan 1 mukainen pikahaku roolin/nimen löytämiseksi ennen kuin annat alustavan kortin placeholder-nimellä ("[Nimi puuttuu]").
-4. Ole tehokas: käytä yhteensä enintään 2-3 web_search-hakua per käyttäjän viesti, ellei tehtävä nimenomaan vaadi enemmän (esim. laaja tutkimusmuistio Vaiheessa 2). Tavoite on nopea, täsmällinen vastaus - ei tyhjentävä selvitystyö joka hidastaa vastausta turhaan.
+3. ÄLÄ esitä pisteytyskorttia niin kauan kuin liidin nimi JA rooli puuttuvat kokonaan, PAITSI jos käyttäjä nimenomaisesti pyytää pisteytystä puutteellisilla tiedoilla (esim. kirjoittaa "pisteytä"). Silloinkin sovella kohdan 1 rajoitusta - yksi ulkoinen tarkistus per vastaus - ennen kuin annat alustavan kortin placeholder-nimellä ("[Nimi puuttuu]").
 
 PISTEYTYKSEN ESITYSMUOTO (pakollinen, käyttöliittymä näyttää tämän erikoiskorttina): kun esität pisteytyksen, kirjoita se AINA omaan koodilohkoonsa jonka ensimmäinen rivi on tarkalleen sana "pisteytys" (pienellä), tällä täsmällisellä rakenteella - älä lisää mitään muuta tekstiä lohkon sisään äläkä muuta rivijärjestystä:
 \`\`\`pisteytys
@@ -71,7 +72,7 @@ const TOOLS = [
   {
     type: 'web_search_20260318',
     name: 'web_search',
-    max_uses: 3,
+    max_uses: 2,
     user_location: { type: 'approximate', country: 'FI', timezone: 'Europe/Helsinki' }
   },
   {
