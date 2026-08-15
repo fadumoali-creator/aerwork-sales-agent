@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LinkedIn Agent — AerWork</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCA0MCA0MCc+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSdnJyB4MT0nMCcgeTE9JzAnIHgyPSc0MCcgeTI9JzQwJyBncmFkaWVudFVuaXRzPSd1c2VyU3BhY2VPblVzZSc+PHN0b3Agc3RvcC1jb2xvcj0nIzJFNkY2RScvPjxzdG9wIG9mZnNldD0nMScgc3RvcC1jb2xvcj0nIzFGMkQ1MCcvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxjaXJjbGUgY3g9JzIwJyBjeT0nMjAnIHI9JzIwJyBmaWxsPSd1cmwoI2cpJy8+PGcgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnPjxsaW5lIHgxPScxMycgeTE9JzI3JyB4Mj0nMjAnIHkyPScxMycvPjxsaW5lIHgxPScyMCcgeTE9JzEzJyB4Mj0nMjgnIHkyPScyNScvPjxsaW5lIHgxPScxMycgeTE9JzI3JyB4Mj0nMjgnIHkyPScyNScvPjwvZz48Y2lyY2xlIGN4PScxMycgY3k9JzI3JyByPSczLjQnIGZpbGw9J3doaXRlJy8+PGNpcmNsZSBjeD0nMjAnIGN5PScxMycgcj0nMy40JyBmaWxsPSd3aGl0ZScvPjxjaXJjbGUgY3g9JzI4JyBjeT0nMjUnIHI9JzMuNCcgZmlsbD0nd2hpdGUnLz48L3N2Zz4K">
+<style>
+  :root{
+    --navy:#1F2D50;
+    --navy-2:#2A3D6B;
+    --teal:#2E6F6E;
+    --teal-light:#E9F3F2;
+    --bg:#F3F4F1;
+    --panel:#FFFFFF;
+    --border:#E3E6E1;
+    --text:#1E2430;
+    --muted:#6B7280;
+    --bubble-user:#1F2D50;
+    --bubble-assistant:#F1F2EF;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; height:100vh; overflow:hidden;
+  }
+
+  /* ---- Setup bar ---- */
+  #setupBar{
+    background:#FFF6E8; border-bottom:1px solid #F0D9A8; padding:12px 20px;
+    font-size:13px; flex-shrink:0;
+  }
+  #setupBar.collapsed .setupBody{display:none;}
+  .setupHead{display:flex; align-items:center; justify-content:space-between; cursor:pointer;}
+  .setupHead strong{color:var(--navy); font-size:13.5px;}
+  .setupHead .toggle{color:var(--teal); font-weight:600; font-size:12.5px;}
+  .setupBody{margin-top:10px;}
+  .setupBody ol{margin:6px 0 12px; padding-left:18px; color:var(--text);}
+  .setupBody li{margin-bottom:4px;}
+  .setupBody a{color:var(--navy);}
+  .keyrow{display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;}
+  .keyrow > div{flex:1; min-width:200px;}
+  .keyrow label{display:block; font-size:12px; font-weight:600; margin-bottom:4px;}
+  .keyrow input, .keyrow select{
+    width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:8px;
+    font-size:13.5px; font-family:inherit; background:#fff;
+  }
+  #keyStatus{margin-top:8px; font-size:12.5px;}
+  #keyStatus.ok{color:#1c7a3d;}
+  #keyStatus.err{color:#b3261e;}
+
+  /* ---- Header ---- */
+  header{
+    display:flex; align-items:center; gap:12px; padding:14px 22px;
+    background:var(--panel); border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .avatar{
+    width:42px; height:42px; border-radius:50%; background:linear-gradient(135deg,var(--teal),var(--navy));
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:15px; flex-shrink:0;
+    box-shadow:0 2px 6px rgba(31,45,80,.25);
+  }
+  .avatar svg{width:58%; height:58%; display:block;}
+  header .titles{flex:1;}
+  header .header-eyebrow{
+    font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--teal);
+    font-weight:700; margin-bottom:1px;
+  }
+  header h1{margin:0; font-size:17px; color:var(--navy);}
+  header .status-line{margin:1px 0 0; font-size:12px; color:var(--muted);}
+  header .status-dot{display:inline-block; width:7px; height:7px; border-radius:50%; background:#bbb; margin-right:5px;}
+  header .status-dot.live{background:#2fae5c;}
+
+  /* ---- Chat area ---- */
+  #chatWrap{flex:1; overflow-y:auto; padding:22px 0;}
+  #chat{max-width:760px; margin:0 auto; padding:0 20px; display:flex; flex-direction:column; gap:16px;}
+
+  .greeting{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    overflow:hidden; text-align:left;
+  }
+  .greeting .banner{background:var(--navy); color:#fff; padding:16px 22px;}
+  .greeting .banner .eyebrow{
+    font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#9fb0d6; margin-bottom:4px;
+  }
+  .greeting .banner h2{margin:0; font-size:17px; color:#fff;}
+  .greeting .body{padding:18px 22px 20px;}
+  .greeting .body p{margin:0 0 14px; color:var(--text); font-size:13.5px; line-height:1.5;}
+  .chips{display:flex; flex-direction:column; gap:8px;}
+  .chip{
+    background:#fff; border:1px solid var(--border); color:var(--navy);
+    padding:11px 14px; border-radius:8px; font-size:13.5px; font-weight:600; cursor:pointer;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .chip .arrow{color:var(--teal); font-weight:700;}
+  .chip:hover{background:var(--teal-light); border-color:#cfe6e4;}
+
+  .msg{display:flex; gap:10px; max-width:100%;}
+  .msg.user{flex-direction:row-reverse;}
+  .msg .bubble-avatar{
+    width:28px; height:28px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:800; color:#fff; box-shadow:0 1px 3px rgba(31,45,80,.2);
+  }
+  .msg .bubble-avatar svg{width:60%; height:60%; display:block;}
+  .msg.assistant .bubble-avatar{background:linear-gradient(135deg,var(--teal),var(--navy));}
+  .msg.user .bubble-avatar{background:#9aa2b1;}
+  .bubble{
+    padding:12px 16px; border-radius:14px; font-size:14.5px; line-height:1.55; max-width:76%;
+    white-space:pre-wrap;
+  }
+  .msg.assistant .bubble{background:var(--bubble-assistant); color:var(--text); border-top-left-radius:4px;}
+  .msg.user .bubble{background:var(--bubble-user); color:#fff; border-top-right-radius:4px;}
+  .bubble p{margin:0 0 10px;}
+  .bubble p:last-child{margin-bottom:0;}
+
+  .draft-card{
+    background:#fff; border:1px solid var(--border); border-radius:10px; padding:12px 14px;
+    margin:8px 0; position:relative; white-space:pre-wrap; font-size:14px;
+  }
+  .draft-card .copyBtn{
+    position:absolute; top:8px; right:8px; background:transparent; border:1px solid var(--teal);
+    color:var(--teal); border-radius:6px; font-size:11.5px; padding:4px 9px; cursor:pointer; font-weight:600;
+  }
+  .draft-card .copyBtn:hover{background:var(--teal-light);}
+
+  .score-card{
+    background:#fff; border:1px solid var(--border); border-radius:12px; overflow:hidden;
+    margin:8px 0; max-width:420px;
+  }
+  .score-card-head{background:var(--navy); color:#fff; padding:11px 16px;}
+  .score-card-name{font-weight:700; font-size:14.5px;}
+  .score-card-company{font-size:12px; color:#9fb0d6; margin-top:1px;}
+  .score-card-main{
+    display:flex; align-items:center; gap:14px; padding:14px 16px; border-bottom:1px solid var(--border);
+  }
+  .score-number{font-size:32px; font-weight:800; color:var(--navy); line-height:1; white-space:nowrap;}
+  .score-number span{font-size:15px; font-weight:600; color:var(--muted);}
+  .score-badge{
+    margin-left:auto; font-size:11.5px; font-weight:700; padding:6px 13px; border-radius:20px;
+    white-space:nowrap; letter-spacing:.02em;
+  }
+  .score-badge.a{background:#E4F6EA; color:#1c7a3d;}
+  .score-badge.b{background:#FFF3D6; color:#8a6100;}
+  .score-badge.none{background:#F1F2EF; color:var(--muted);}
+  .score-breakdown{padding:12px 16px 14px; display:flex; flex-direction:column; gap:7px;}
+  .score-row{display:flex; align-items:flex-start; gap:10px; font-size:13px; line-height:1.4;}
+  .score-row .pts{
+    flex-shrink:0; min-width:28px; text-align:center; font-weight:700; font-size:11.5px;
+    border-radius:6px; padding:2px 4px;
+  }
+  .score-row.plus .pts{background:#E4F6EA; color:#1c7a3d;}
+  .score-row.zero .pts{background:#F1F2EF; color:var(--muted);}
+  .score-row .label{color:var(--text);}
+  .score-row .label b{color:var(--navy);}
+
+  .typing{display:flex; gap:4px; padding:4px 0;}
+  .typing span{width:6px; height:6px; border-radius:50%; background:var(--muted); animation:blink 1.2s infinite ease-in-out;}
+  .typing span:nth-child(2){animation-delay:.2s;}
+  .typing span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink{0%,80%,100%{opacity:.25;}40%{opacity:1;}}
+
+  .error-bubble{
+    background:#FDECEA; border:1px solid #F3B3AC; color:#8a271f; border-radius:10px;
+    padding:10px 14px; font-size:13.5px; max-width:76%;
+  }
+
+  /* ---- Input bar ---- */
+  #inputBar{
+    border-top:1px solid var(--border); background:var(--panel); padding:14px 20px; flex-shrink:0;
+  }
+  #inputInner{max-width:760px; margin:0 auto; display:flex; align-items:flex-end; gap:10px;}
+  #textInput{
+    flex:1; resize:none; border:1px solid var(--border); border-radius:14px; padding:11px 14px;
+    font-size:14.5px; font-family:inherit; max-height:140px; min-height:44px; background:#fbfbfa;
+  }
+  #textInput:focus{outline:2px solid var(--teal); outline-offset:1px;}
+  #sendBtn{
+    width:42px; height:42px; border-radius:50%; background:var(--navy); border:none; color:#fff;
+    font-size:17px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  }
+  #sendBtn:disabled{opacity:.4; cursor:default;}
+  #sendBtn:hover:not(:disabled){background:var(--navy-2);}
+  .footnote{max-width:760px; margin:8px auto 0; font-size:11.5px; color:var(--muted); text-align:center;}
+</style>
+</head>
+<body>
+
+  <div id="setupBar" class="collapsed">
+    <div class="setupHead" id="setupHead">
+      <strong>⚙️ Tietoa työkalusta</strong>
+      <span class="toggle" id="setupToggle">Näytä</span>
+    </div>
+    <div class="setupBody" id="setupBody">
+      <ol>
+        <li>API-avainta ei tarvitse enää syöttää tähän — se on tallennettu turvallisesti Netlifyn palvelimelle, ei tähän sivuun.</li>
+        <li>Agentilla on nyt pääsy oikeisiin lähteisiin: web-haku (uutiset, yritysten omat sivut, Finder.fi/Kauppalehti-listaukset) ja PRH:n (Patentti- ja rekisterihallitus) virallinen yritysrekisteri.</li>
+        <li>Jos vastaukset lakkaavat toimimasta, tarkista Netlifyn Project configuration → Environment variables -kohdasta että <code>ANTHROPIC_API_KEY</code> on asetettu ja voimassa.</li>
+      </ol>
+      <div class="keyrow">
+        <div style="max-width:200px;">
+          <label for="modelSelect">Malli</label>
+          <select id="modelSelect">
+            <option value="claude-sonnet-5" selected>Claude Sonnet 5</option>
+            <option value="claude-opus-5">Claude Opus 5</option>
+            <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+          </select>
+        </div>
+      </div>
+      <div id="keyStatus"></div>
+    </div>
+  </div>
+
+  <header>
+    <div class="avatar"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><g stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.95"><line x1="13" y1="27" x2="20" y2="13"/><line x1="20" y1="13" x2="28" y2="25"/><line x1="13" y1="27" x2="28" y2="25"/></g><circle cx="13" cy="27" r="3.4" fill="#fff"/><circle cx="20" cy="13" r="3.4" fill="#fff"/><circle cx="28" cy="25" r="3.4" fill="#fff"/></svg></div>
+    <div class="titles">
+      <div class="header-eyebrow">AerWork</div>
+      <h1>LinkedIn Agent</h1>
+      <p class="status-line"><span class="status-dot live" id="statusDot"></span><span id="statusText">Valmis keskustelemaan — hakee tietoa webistä ja PRH:sta</span></p>
+    </div>
+  </header>
+
+  <div id="chatWrap">
+    <div id="chat">
+      <div class="greeting" id="greeting">
+        <div class="banner">
+          <div class="eyebrow">AerWork · Sales Agent</div>
+          <h2>LinkedIn Agent — LinkedIn-myyntiprosessin assistentti</h2>
+        </div>
+        <div class="body">
+          <p>Käyn puolestasi läpi liidin pisteytyksen, taustatutkimuksen ja viestiluonnokset — sekä tulkitsen saamasi vastaukset. Kaikki tuotokset ovat luonnoksia; en koskaan lähetä mitään itse LinkedIniin. Valitse aloitustoiminto, tai kirjoita suoraan alla olevaan kenttään.</p>
+          <div class="chips">
+            <div class="chip" data-msg="Haluan pisteyttää uuden liidin. Kysy minulta tarvittavat tiedot yksi kerrallaan."><span>Pisteytä ja tutki uusi liidi</span><span class="arrow">→</span></div>
+            <div class="chip" data-msg="Sain LinkedIn-vastauksen, jonka haluan käydä läpi kanssasi."><span>Analysoi vastaanotettu vastaus</span><span class="arrow">→</span></div>
+            <div class="chip" data-msg="Miten tämä agentti oikein toimii ja millä säännöillä se kirjoittaa viestejä?"><span>Näytä prosessin säännöt</span><span class="arrow">→</span></div>
+            <div class="chip" data-msg="Näytä liidilistani ja kerro kenelle pitäisi laittaa follow-up."><span>Näytä liidilista ja follow-upit</span><span class="arrow">→</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="inputBar">
+    <div id="inputInner">
+      <textarea id="textInput" placeholder="Liitä liidin tiedot, saamasi vastaus, tai kysy jotain..." rows="1"></textarea>
+      <button id="sendBtn" title="Lähetä">➤</button>
+    </div>
+    <p class="footnote">Kaikki vastaukset ovat luonnoksia — kopioi ja lähetä itse LinkedInissä.</p>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// HUOM: system-prompt ja API-avain elävät nyt palvelimella (netlify/functions/chat.js) — tätä muuttujaa ei enää käytetä, jätetty vain historiatiedoksi.
+let history = [];
+
+function setStatus(ok, msg){
+  $('statusDot').classList.toggle('live', ok);
+  $('statusText').textContent = msg;
+}
+
+function getModel(){
+  return $('modelSelect').value;
+}
+
+$('setupHead').addEventListener('click', () => {
+  $('setupBar').classList.toggle('collapsed');
+  $('setupToggle').textContent = $('setupBar').classList.contains('collapsed') ? 'Näytä' : 'Piilota';
+});
+
+// ---- chat rendering ----
+function scrollToBottom(){
+  const wrap = $('chatWrap');
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function escapeHtml(s){
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function parseScoreBlock(raw){
+  const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length);
+  if (lines.length < 2) return null;
+
+  const nameLine = lines[0].split(/\s+—\s+|\s+-\s+/);
+  if (nameLine.length < 2) return null;
+  const name = nameLine[0].trim();
+  const company = nameLine.slice(1).join(' - ').trim();
+
+  const scoreMatch = lines[1].match(/^(\d+)\/14\s*[—-]\s*Prioriteetti\s+(A|B|EI JATKOTOIMIA)/i);
+  if (!scoreMatch) return null;
+  const total = scoreMatch[1];
+  const priorityRaw = scoreMatch[2].toUpperCase();
+  const priorityClass = priorityRaw === 'A' ? 'a' : (priorityRaw === 'B' ? 'b' : 'none');
+  const priorityLabel = priorityRaw === 'EI JATKOTOIMIA' ? 'Ei jatkotoimia' : ('Prioriteetti ' + priorityRaw);
+
+  const rows = [];
+  for (let i = 2; i < lines.length; i++){
+    const m = lines[i].match(/^([+-]?\d+)\s+(.+)$/);
+    if (!m) continue;
+    rows.push({ pts: m[1], label: m[2] });
+  }
+  if (!rows.length) return null;
+
+  return { name, company, total, priorityClass, priorityLabel, rows };
+}
+
+function buildScoreCard(data){
+  const card = document.createElement('div');
+  card.className = 'score-card';
+
+  const head = document.createElement('div');
+  head.className = 'score-card-head';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'score-card-name';
+  nameEl.textContent = data.name;
+  const companyEl = document.createElement('div');
+  companyEl.className = 'score-card-company';
+  companyEl.textContent = data.company;
+  head.appendChild(nameEl);
+  head.appendChild(companyEl);
+  card.appendChild(head);
+
+  const main = document.createElement('div');
+  main.className = 'score-card-main';
+  const numEl = document.createElement('div');
+  numEl.className = 'score-number';
+  numEl.innerHTML = escapeHtml(data.total) + '<span>/14</span>';
+  const badge = document.createElement('div');
+  badge.className = 'score-badge ' + data.priorityClass;
+  badge.textContent = data.priorityLabel;
+  main.appendChild(numEl);
+  main.appendChild(badge);
+  card.appendChild(main);
+
+  const breakdown = document.createElement('div');
+  breakdown.className = 'score-breakdown';
+  data.rows.forEach(row => {
+    const rowEl = document.createElement('div');
+    const isZero = /^[+-]?0$/.test(row.pts);
+    rowEl.className = 'score-row ' + (isZero ? 'zero' : 'plus');
+    const ptsEl = document.createElement('span');
+    ptsEl.className = 'pts';
+    ptsEl.textContent = row.pts.startsWith('+') || row.pts.startsWith('-') ? row.pts : ('+' + row.pts);
+    const labelEl = document.createElement('span');
+    labelEl.className = 'label';
+    labelEl.innerHTML = escapeHtml(row.label).replace(/^([^:]+):/, '<b>$1</b>:');
+    rowEl.appendChild(ptsEl);
+    rowEl.appendChild(labelEl);
+    breakdown.appendChild(rowEl);
+  });
+  card.appendChild(breakdown);
+
+  return card;
+}
+
+function renderAssistantContent(text){
+  // split on triple-backtick blocks, render those as draft cards (or score cards) with copy buttons
+  const parts = text.split(/```/);
+  const frag = document.createDocumentFragment();
+  parts.forEach((part, i) => {
+    if (i % 2 === 1){
+      // code/draft block
+      let clean = part.replace(/^\n/, '').replace(/\n$/, '');
+
+      if (/^pisteytys\s*\n/i.test(clean)){
+        const scoreData = parseScoreBlock(clean.replace(/^pisteytys\s*\n/i, ''));
+        if (scoreData){
+          frag.appendChild(buildScoreCard(scoreData));
+          return;
+        }
+        // parsing failed - fall through to plain draft-card rendering below, stripping the label
+        clean = clean.replace(/^pisteytys\s*\n/i, '');
+      }
+
+      const card = document.createElement('div');
+      card.className = 'draft-card';
+      const btn = document.createElement('button');
+      btn.className = 'copyBtn';
+      btn.textContent = 'Kopioi';
+      btn.onclick = () => {
+        navigator.clipboard.writeText(clean).then(() => {
+          btn.textContent = 'Kopioitu ✓';
+          setTimeout(() => btn.textContent = 'Kopioi', 1400);
+        });
+      };
+      card.appendChild(btn);
+      const body = document.createElement('div');
+      body.textContent = clean;
+      body.style.marginTop = '4px';
+      card.appendChild(body);
+      frag.appendChild(card);
+    } else if (part.trim()) {
+      part.trim().split(/\n\n+/).forEach(paragraph => {
+        const p = document.createElement('p');
+        // light bold support
+        p.innerHTML = escapeHtml(paragraph).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        frag.appendChild(p);
+      });
+    }
+  });
+  return frag;
+}
+
+const AGENT_AVATAR_SVG = '<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><g stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.95"><line x1="13" y1="27" x2="20" y2="13"/><line x1="20" y1="13" x2="28" y2="25"/><line x1="13" y1="27" x2="28" y2="25"/></g><circle cx="13" cy="27" r="3.4" fill="#fff"/><circle cx="20" cy="13" r="3.4" fill="#fff"/><circle cx="28" cy="25" r="3.4" fill="#fff"/></svg>';
+
+function addMessage(role, text){
+  const row = document.createElement('div');
+  row.className = 'msg ' + role;
+  const av = document.createElement('div');
+  av.className = 'bubble-avatar';
+  if (role === 'user'){ av.textContent = 'F'; } else { av.innerHTML = AGENT_AVATAR_SVG; }
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (role === 'assistant'){
+    bubble.appendChild(renderAssistantContent(text));
+  } else {
+    bubble.textContent = text;
+  }
+  row.appendChild(av);
+  row.appendChild(bubble);
+  $('chat').appendChild(row);
+  scrollToBottom();
+  return row;
+}
+
+let typingHintTimer = null;
+
+function addTyping(){
+  const row = document.createElement('div');
+  row.className = 'msg assistant';
+  row.id = 'typingRow';
+  const av = document.createElement('div');
+  av.className = 'bubble-avatar';
+  av.innerHTML = AGENT_AVATAR_SVG;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.id = 'typingBubble';
+  bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+  row.appendChild(av);
+  row.appendChild(bubble);
+  $('chat').appendChild(row);
+  scrollToBottom();
+
+  // Haku voi kestää muutamia sekunteja (verkkohaku, PRH-tarkistus) — kerrotaan
+  // se käyttäjälle jos vastaus ei tule heti, ettei näytä jumiutuneelta.
+  const hints = [
+    'Haen tietoa...',
+    'Tarkistan PRH:n ja verkon lähteitä...',
+    'Vielä hetki, kokoan vastausta...'
+  ];
+  let hintIndex = 0;
+  typingHintTimer = setInterval(() => {
+    const bubbleEl = $('typingBubble');
+    if (!bubbleEl) return;
+    const hintEl = bubbleEl.querySelector('.typing-hint');
+    if (hintEl){
+      hintEl.textContent = hints[hintIndex % hints.length];
+      hintIndex++;
+    } else if (hintIndex === 0){
+      const span = document.createElement('div');
+      span.className = 'typing-hint';
+      span.style.cssText = 'font-size:12px; color:var(--muted); margin-top:4px;';
+      span.textContent = hints[0];
+      bubbleEl.appendChild(span);
+      hintIndex++;
+    }
+  }, 4000);
+}
+
+function removeTyping(){
+  if (typingHintTimer){ clearInterval(typingHintTimer); typingHintTimer = null; }
+  const row = $('typingRow');
+  if (row) row.remove();
+}
+
+function addErrorBubble(msg){
+  const row = document.createElement('div');
+  row.className = 'msg assistant';
+  const av = document.createElement('div');
+  av.className = 'bubble-avatar';
+  av.textContent = '!';
+  const bubble = document.createElement('div');
+  bubble.className = 'error-bubble';
+  bubble.textContent = msg;
+  row.appendChild(av);
+  row.appendChild(bubble);
+  $('chat').appendChild(row);
+  scrollToBottom();
+}
+
+function makeJobId(){
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'job-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+}
+
+function sleep(ms){
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Vastaus lasketaan Netlifyn taustafunktiossa (chat-background.js), jolla on
+// aikaa jopa 15 minuuttia (ei enää 10 sekunnin rajaa). Tämä funktio käynnistää
+// laskennan ja pollaa sen jälkeen chat-status.js:ää kunnes tulos on valmis.
+async function callClaude(messages){
+  const model = getModel();
+  const jobId = makeJobId();
+
+  const startRes = await fetch('/.netlify/functions/chat-background', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, history: messages, jobId })
+  });
+  if (!startRes.ok){
+    throw new Error('Palvelinvirhe (' + startRes.status + ') — käsittelyä ei saatu käyntiin.');
+  }
+
+  const maxWaitMs = 120000; // 2 min turvaraja frontendissä
+  const pollIntervalMs = 1500;
+  const startedAt = Date.now();
+
+  await sleep(900); // annetaan taustafunktiolle hetki ehtiä käynnistyä
+
+  while (Date.now() - startedAt < maxWaitMs){
+    const res = await fetch('/.netlify/functions/chat-status?id=' + encodeURIComponent(jobId));
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || (data && data.status === 'error')){
+      throw new Error((data && data.error) || ('Palvelinvirhe (' + res.status + ').'));
+    }
+    if (data && data.status === 'done'){
+      return data.text || '';
+    }
+    // status 'pending' tai puuttuu vielä — jatketaan pollausta
+    await sleep(pollIntervalMs);
+  }
+
+  throw new Error('Vastaus kesti liian kauan (yli 2 min) — yritä uudelleen, tai lyhennä kysymystä.');
+}
+
+async function sendMessage(text){
+  if (!text.trim()) return;
+  addMessage('user', text);
+  history.push({ role: 'user', content: text });
+
+  $('sendBtn').disabled = true;
+  addTyping();
+  try {
+    const reply = await callClaude(history);
+    removeTyping();
+    $('greeting').style.display = 'none';
+    addMessage('assistant', reply);
+    history.push({ role: 'assistant', content: reply });
+  } catch (err) {
+    removeTyping();
+    // keep greeting/chips visible so the user can retry easily after an error
+    history.pop();
+    addErrorBubble(err.message);
+  } finally {
+    $('sendBtn').disabled = false;
+  }
+}
+
+$('sendBtn').addEventListener('click', () => {
+  const val = $('textInput').value;
+  $('textInput').value = '';
+  $('textInput').style.height = 'auto';
+  sendMessage(val);
+});
+
+$('textInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    $('sendBtn').click();
+  }
+});
+
+$('textInput').addEventListener('input', function(){
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+});
+
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    sendMessage(chip.getAttribute('data-msg'));
+  });
+});
+
+// init status (palvelin hoitaa API-avaimen — ei tarvitse tarkistaa selaimessa)
+setStatus(true, 'Valmis keskustelemaan — hakee tietoa webistä ja PRH:sta');
+</script>
+</body>
+</html>
