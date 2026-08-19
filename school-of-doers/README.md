@@ -16,10 +16,13 @@ kolmiosainen:
 2. **Mentorointi**
 3. **Studiotilan vuokraus** (esim. workshoppeja, kuvauksia, koulutustilaisuuksia ja muita tapahtumia varten)
 
-**Ydinkohderyhmä (ICP):** pienet, tyypillisesti alle 200 000 € liikevaihdon
-yritykset — pienet tilitoimistot, asiantuntijayrittäjät (yksinyrittäjät ja
-pienet asiantuntijaorganisaatiot), ja pienet henkilöstövuokrausyritykset.
-Päättäjä on käytännössä lähes aina yrityksen omistaja itse.
+**Ydinkohderyhmä (ICP):** pienet mutta taloudellisesti terveet yritykset —
+liikevaihto **vähintään** noin 200 000 € (alaraja, ei kattoraja — "hyvä
+liikevaihto" on osa ICP:tä) ja **korkeintaan** noin 10 työntekijää. Tyypillisiä
+esimerkkejä: pienet tilitoimistot, asiantuntijayrittäjät (usein alkujaan
+yksinyrittäjiä jotka ovat kasvaneet muutaman hengen tiimiksi), ja pienet
+henkilöstövuokrausyritykset. Päättäjä on käytännössä lähes aina yrityksen
+omistaja itse.
 
 ## Rakenne
 
@@ -42,7 +45,7 @@ Netlify-sivustoa (`netlify.toml`: `functions = "netlify/functions"`,
 
 | Tiimi | Tehtävä | Työkalut | Pysyvä tallennin |
 |---|---|---|---|
-| Sales | Liidipisteytys ICP:n mukaan (tilitoimistot/asiantuntijayrittäjät/henkilöstövuokraus, <200k€ liikevaihto), taustatutkimus, ensiviestit, vastausten tulkinta, tapaamisehdotus | `web_search`, `prh_lookup` (suomalaiset yritykset), `crm_db` | `sod-sales-leads` |
+| Sales | Liidipisteytys ICP:n mukaan (tilitoimistot/asiantuntijayrittäjät/henkilöstövuokraus, liikevaihto ≥~200k€ ja korkeintaan ~10 työntekijää), taustatutkimus, ensiviestit, vastausten tulkinta, tapaamisehdotus | `web_search`, `prh_lookup` (suomalaiset yritykset), `crm_db` | `sod-sales-leads` |
 | Marketing | Kampanjabrief (valmennus/mentorointi/studiotila), markkinatutkimus, kampanjasuunnitelma, seuranta | `web_search`, `campaign_db` | `sod-marketing-campaigns` |
 | Social media | Postausideat, caption-luonnokset, trendit, sisältökalenteri | `web_search`, `content_calendar_db` | `sod-social-calendar` |
 
