@@ -1,15 +1,17 @@
 // School of Doers — Tiimiagentit — pollausfunktio.
 // Kevyt, nopea funktio (ei taustafunktio) jota frontend kutsuu toistuvasti
-// ("pollaa") kunnes sod-chat-background.js on kirjoittanut vastauksen
+// ("pollaa") kunnes chat-background.js on kirjoittanut vastauksen
 // valmiiksi Netlify Blobsiin. Yhteinen kaikille kolmelle tiimille — jobId on
 // satunnainen UUID per pyyntö, joten tiimien välillä ei voi tulla törmäystä.
-// Sama malli kuin netlify/functions/chat-status.js.
+//
+// HUOM: Tämä on OMA, ERILLINEN Netlify-sivusto (School of Doers) — eri
+// sivusto kuin repon juuren AerWork-agentti. Sama koodimalli, oma deploy.
 
 const { getStore } = require('@netlify/blobs');
 
 function getBlobsStore(name) {
-  const siteID = process.env.SOD_BLOBS_SITE_ID || process.env.AERWORK_BLOBS_SITE_ID;
-  const token = process.env.SOD_BLOBS_TOKEN || process.env.AERWORK_BLOBS_TOKEN;
+  const siteID = process.env.SOD_BLOBS_SITE_ID;
+  const token = process.env.SOD_BLOBS_TOKEN;
   return siteID && token ? getStore({ name, siteID, token }) : getStore(name);
 }
 

@@ -7,21 +7,26 @@
 // työkalut ja pysyvän tallentimen nimi. Tämä pitää huollon yhdessä paikassa:
 // uuden tiimin lisääminen = yksi uusi rivi TEAMS-oliossa, ei uutta tiedostoa.
 //
-// Sama "-background"-nimeämiskäytäntö kuin netlify/functions/chat-background.js:
-// tiedostonimen pääte kertoo Netlifylle että funktio saa juosta taustalla
-// jopa 15 minuuttia (ei 10 sekunnin synkronista rajaa). Netlify vastaa
-// kutsujalle heti "202 Accepted", joten tämä funktio EI voi palauttaa
+// Tiedostonimen "-background"-pääte kertoo Netlifylle että funktio saa juosta
+// taustalla jopa 15 minuuttia (ei 10 sekunnin synkronista rajaa). Netlify
+// vastaa kutsujalle heti "202 Accepted", joten tämä funktio EI voi palauttaa
 // vastausta suoraan — se kirjoittaa lopputuloksen Netlify Blobsiin jobId:n
-// alle, ja sod-chat-status.js lukee sen sieltä kun frontend pollaa.
+// alle, ja chat-status.js lukee sen sieltä kun frontend pollaa.
+//
+// HUOM: Tämä on OMA, ERILLINEN Netlify-sivusto (School of Doers) — eri
+// sivusto kuin repon juuren AerWork-agentti. Sama koodimalli, mutta oma
+// deploy, oma domain, omat ympäristömuuttujat ja oma Blobs-tallennustila.
 
 const { getStore } = require('@netlify/blobs');
 
-// Sama korjaus kuin netlify/functions/chat-background.js:ssä (16.8.2026):
-// getStore() @netlify/blobs-paketissa (v8) hyväksyy VAIN yhden argumentin —
-// joko pelkän nimen tai yhden olio-argumentin { name, siteID, token }.
+// Sama korjaus kuin AerWork-agentin funktioissa (16.8.2026): getStore()
+// @netlify/blobs-paketissa (v8) hyväksyy VAIN yhden argumentin — joko pelkän
+// nimen tai yhden olio-argumentin { name, siteID, token }. Manuaaliset
+// tunnisteet ovat vain varalla siltä varalta että automaattinen Blobs-
+// kontekstin tunnistus ei toimisi tälläkään sivustolla tuotannossa.
 function getBlobsStore(name) {
-  const siteID = process.env.SOD_BLOBS_SITE_ID || process.env.AERWORK_BLOBS_SITE_ID;
-  const token = process.env.SOD_BLOBS_TOKEN || process.env.AERWORK_BLOBS_TOKEN;
+  const siteID = process.env.SOD_BLOBS_SITE_ID;
+  const token = process.env.SOD_BLOBS_TOKEN;
   return siteID && token ? getStore({ name, siteID, token }) : getStore(name);
 }
 

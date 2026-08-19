@@ -205,7 +205,7 @@ const $ = (id) => document.getElementById(id);
 // ---------------------------------------------------------------------------
 // TIIMIKONFIGURAATIOT (frontend-puoli: vain esittelyteksti + aloituschipit —
 // varsinaiset system-promptit ja työkalut elävät palvelimella,
-// netlify/functions/sod-chat-background.js:ssä, team-parametrin mukaan valiten)
+// school-of-doers/netlify/functions/chat-background.js:ssä, team-parametrin mukaan valiten)
 // ---------------------------------------------------------------------------
 const TEAMS = {
   sales: {
@@ -541,13 +541,13 @@ function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Vastaus lasketaan Netlifyn taustafunktiossa (sod-chat-background.js), jolla
+// Vastaus lasketaan Netlifyn taustafunktiossa (chat-background.js), jolla
 // on aikaa jopa 15 minuuttia. Tämä funktio käynnistää laskennan ja pollaa
-// sen jälkeen sod-chat-status.js:ää kunnes tulos on valmis.
+// sen jälkeen chat-status.js:ää kunnes tulos on valmis.
 async function callAgent(team, messages){
   const jobId = makeJobId();
 
-  const startRes = await fetch('/.netlify/functions/sod-chat-background', {
+  const startRes = await fetch('/.netlify/functions/chat-background', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ team, history: messages, jobId })
@@ -563,7 +563,7 @@ async function callAgent(team, messages){
   await sleep(900);
 
   while (Date.now() - startedAt < maxWaitMs){
-    const res = await fetch('/.netlify/functions/sod-chat-status?id=' + encodeURIComponent(jobId));
+    const res = await fetch('/.netlify/functions/chat-status?id=' + encodeURIComponent(jobId));
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || (data && data.status === 'error')){

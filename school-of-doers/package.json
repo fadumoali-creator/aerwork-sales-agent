@@ -1,0 +1,9 @@
+{
+  "name": "school-of-doers-agents",
+  "private": true,
+  "version": "1.0.0",
+  "description": "School of Doers - Sales/Marketing/Social media tiimiagentit - Netlify Function backend",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}

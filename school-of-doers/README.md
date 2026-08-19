@@ -1,11 +1,12 @@
 # School of Doers — Tiimiagentit (Sales / Marketing / Social media)
 
 Kolme chat-agenttia School of Doersin kolmelle tiimille. **School of Doers on
-oma, itsenäinen yrityksensä — eri yritys kuin AerWork.** Tekninen perusta
-(job-polling-malli Netlify Background Functionilla) on lainattu juuriprojektin
-AerWork-agentilta, mutta liiketoiminta, kohderyhmä ja system-promptit ovat
-täysin omansa. Kaikki kolme tiimiä jakavat yhden taustafunktion kolmen
-erillisen tiedoston sijaan.
+oma, itsenäinen yrityksensä — eri yritys kuin AerWork, mutta samalla
+omistajalla** (ks. RISTIINMYYNTI-kohta alla). Tämä kansio on **oma, erillinen
+Netlify-sivusto** — eri deploy, eri domain, eri ympäristömuuttujat kuin
+juuriprojektin AerWork-agentilla, vaikka koodimalli (job-polling-malli
+Netlify Background Functionilla) on samalla periaatteella rakennettu. Kaikki
+kolme tiimiä jakavat yhden taustafunktion kolmen erillisen tiedoston sijaan.
 
 ## School of Doersin liiketoiminta
 
@@ -24,22 +25,43 @@ yksinyrittäjiä jotka ovat kasvaneet muutaman hengen tiimiksi), ja pienet
 henkilöstövuokrausyritykset. Päättäjä on käytännössä lähes aina yrityksen
 omistaja itse.
 
-## Rakenne
+## Ristiinmyynti AerWorkin kanssa
+
+School of Doers ja AerWork ovat eri yritykset/brändit — Sales-agentti ei
+koskaan sekoita niitä. Niillä on kuitenkin sama omistaja, joten olemassa
+oleva AerWork-yhteys/-kiinnostus liidillä on hyödyllinen lämmin avaus
+School of Doersin ensiviestiin (mutta ei suora pisteytyksen kiinnostus-
+signaali). Tämä sääntö on kirjattu pysyvästi Sales-tiimin system-promptiin.
+
+## Rakenne (oma Netlify-sivusto)
+
+Tämä `school-of-doers/`-kansio on **itsenäinen Netlify-sivusto**, jolla on
+oma `netlify.toml` ja `package.json` — sitä EI enää deployata osana
+juuriprojektin (AerWork:in) sivustoa.
 
 - `school-of-doers/index.html` — chat-käyttöliittymä. Yläpalkin
   välilehdet (`Sales` / `Marketing` / `Social media`) vaihtavat aktiivista
   tiimiä; jokaisella tiimillä on oma keskusteluhistoria selaimen muistissa.
-- `netlify/functions/sod-chat-background.js` — yksi taustafunktio kaikille
-  kolmelle tiimille. `TEAMS`-olio sisältää jokaisen tiimin system-promptin,
-  käytettävissä olevat työkalut ja pysyvän tallentimen (Blobs-store) nimen.
-  Uuden tiimin lisääminen = uusi avain `TEAMS`-oliossa, ei uutta tiedostoa.
-- `netlify/functions/sod-chat-status.js` — kevyt pollausfunktio, jota
-  frontend kutsuu kunnes taustafunktio on kirjoittanut vastauksen valmiiksi.
+- `school-of-doers/netlify.toml` — tämän sivuston oma build-konfiguraatio
+  (`functions = "netlify/functions"`, `publish = "."`, molemmat suhteessa
+  tähän kansioon).
+- `school-of-doers/package.json` — tämän sivuston omat riippuvuudet
+  (`@netlify/blobs`).
+- `school-of-doers/netlify/functions/chat-background.js` — yksi
+  taustafunktio kaikille kolmelle tiimille. `TEAMS`-olio sisältää jokaisen
+  tiimin system-promptin, käytettävissä olevat työkalut ja pysyvän
+  tallentimen (Blobs-store) nimen. Uuden tiimin lisääminen = uusi avain
+  `TEAMS`-oliossa, ei uutta tiedostoa.
+- `school-of-doers/netlify/functions/chat-status.js` — kevyt pollausfunktio,
+  jota frontend kutsuu kunnes taustafunktio on kirjoittanut vastauksen
+  valmiiksi.
 
-Funktiot ovat samassa `netlify/functions/`-kansiossa kuin juuriprojektin
-AerWork-funktiot (`sod-`-etuliite erottaa ne), koska koko repo on yhtä
-Netlify-sivustoa (`netlify.toml`: `functions = "netlify/functions"`,
-`publish = "."`). Sivu on siis tuotannossa osoitteessa `/school-of-doers/`.
+## Julkaisu Netlifyyn
+
+Netlify-sivusto luodaan tämän repon `school-of-doers/`-kansiosta base
+directorynä (Site settings → Build & deploy → "Base directory":
+`school-of-doers`, tai jos deployataan CLI:llä, `netlify deploy` ajetaan
+tästä kansiosta käsin).
 
 ## Tiimit ja niiden työkalut
 
@@ -55,13 +77,14 @@ joten agentti hakee ensin nykyisen listan ennen päivitystä.
 
 ## Ympäristömuuttujat
 
-- `ANTHROPIC_API_KEY` — pakollinen, sama muuttuja kuin juuriprojektin
-  agentilla.
-- `SOD_BLOBS_SITE_ID` / `SOD_BLOBS_TOKEN` — valinnainen. Jos asetettu,
-  käytetään näitä Netlify Blobsin manuaaliseen tunnistukseen (sama korjaus
-  kuin `chat-background.js`:ssä, ks. sen kommentit). Jos ei asetettu,
-  funktiot käyttävät varalla `AERWORK_BLOBS_SITE_ID` / `AERWORK_BLOBS_TOKEN`
-  -arvoja, ja jos niitäkään ei ole, Netlifyn automaattista tunnistusta.
+Nämä asetetaan **tämän uuden School of Doers -sivuston** omiin Netlify-
+ympäristömuuttujiin (Project configuration → Environment variables), ei
+AerWork-sivuston muuttujiin:
+
+- `ANTHROPIC_API_KEY` — pakollinen.
+- `SOD_BLOBS_SITE_ID` / `SOD_BLOBS_TOKEN` — valinnainen, tarvitaan vain jos
+  Netlify Blobsin automaattinen kontekstin tunnistus ei toimisi tuotannossa
+  (sama korjaus kuin AerWork-agentin funktioissa, ks. koodikommentit).
 
 ## Jatkokehitys / testaus tehty
 
