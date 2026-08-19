@@ -1,9 +1,25 @@
 # School of Doers — Tiimiagentit (Sales / Marketing / Social media)
 
-Kolme chat-agenttia School of Doersin kolmelle tiimille, rakennettu samalle
-tekniselle perustalle kuin juuriprojektin AerWork-agentti (`index.html` +
-Netlify Background Function -job-polling-malli), mutta yhdellä jaetulla
-taustafunktiolla kolmen erillisen tiedoston sijaan.
+Kolme chat-agenttia School of Doersin kolmelle tiimille. **School of Doers on
+oma, itsenäinen yrityksensä — eri yritys kuin AerWork.** Tekninen perusta
+(job-polling-malli Netlify Background Functionilla) on lainattu juuriprojektin
+AerWork-agentilta, mutta liiketoiminta, kohderyhmä ja system-promptit ovat
+täysin omansa. Kaikki kolme tiimiä jakavat yhden taustafunktion kolmen
+erillisen tiedoston sijaan.
+
+## School of Doersin liiketoiminta
+
+School of Doers on valmennus- ja mentorointiyritys, jonka tarjonta on
+kolmiosainen:
+
+1. **Valmennus**
+2. **Mentorointi**
+3. **Studiotilan vuokraus** (esim. workshoppeja, kuvauksia, koulutustilaisuuksia ja muita tapahtumia varten)
+
+**Ydinkohderyhmä (ICP):** pienet, tyypillisesti alle 200 000 € liikevaihdon
+yritykset — pienet tilitoimistot, asiantuntijayrittäjät (yksinyrittäjät ja
+pienet asiantuntijaorganisaatiot), ja pienet henkilöstövuokrausyritykset.
+Päättäjä on käytännössä lähes aina yrityksen omistaja itse.
 
 ## Rakenne
 
@@ -26,8 +42,8 @@ Netlify-sivustoa (`netlify.toml`: `functions = "netlify/functions"`,
 
 | Tiimi | Tehtävä | Työkalut | Pysyvä tallennin |
 |---|---|---|---|
-| Sales | Liidipisteytys, taustatutkimus, ensiviestit, vastausten tulkinta, tapaamisehdotus | `web_search`, `prh_lookup` (suomalaiset yritykset), `crm_db` | `sod-sales-leads` |
-| Marketing | Kampanjabrief, markkinatutkimus, kampanjasuunnitelma, seuranta | `web_search`, `campaign_db` | `sod-marketing-campaigns` |
+| Sales | Liidipisteytys ICP:n mukaan (tilitoimistot/asiantuntijayrittäjät/henkilöstövuokraus, <200k€ liikevaihto), taustatutkimus, ensiviestit, vastausten tulkinta, tapaamisehdotus | `web_search`, `prh_lookup` (suomalaiset yritykset), `crm_db` | `sod-sales-leads` |
+| Marketing | Kampanjabrief (valmennus/mentorointi/studiotila), markkinatutkimus, kampanjasuunnitelma, seuranta | `web_search`, `campaign_db` | `sod-marketing-campaigns` |
 | Social media | Postausideat, caption-luonnokset, trendit, sisältökalenteri | `web_search`, `content_calendar_db` | `sod-social-calendar` |
 
 Jokainen tallennin toimii samalla `action: "get"` / `action: "save"`
