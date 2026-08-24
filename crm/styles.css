@@ -313,21 +313,62 @@ h3{color:var(--navy-700); font-size:var(--text-md);}
 .kanban-col{
   background:var(--neutral-50); border-radius:var(--radius-lg); padding:10px; min-width:230px; flex-shrink:0;
 }
-.kanban-col h4{margin:2px 6px 10px; font-size:var(--text-sm); color:var(--navy-700); text-transform:uppercase; letter-spacing:.03em;}
-.kanban-card{
-  background:var(--panel); border:1px solid var(--border); border-radius:9px; padding:10px 12px; margin-bottom:8px;
-  font-size:var(--text-base); cursor:grab; box-shadow:var(--shadow-card);
-}
-.kanban-card:active{cursor:grabbing;}
-.kanban-card .kc-name{font-weight:700; color:var(--navy-700); font-size:var(--text-base);}
-.kanban-card .kc-meta{color:var(--neutral-500); font-size:var(--text-sm); margin-top:3px;}
-.kc-value-input{
-  width:100%; border:1px solid transparent; background:transparent; padding:2px 4px; margin:-2px -4px;
-  font-size:var(--text-sm); color:var(--neutral-500); border-radius:6px; cursor:text; font-family:inherit;
-}
-.kc-value-input:hover{background:var(--neutral-50); border-color:var(--border);}
-.kc-value-input:focus{outline:none; background:var(--panel); border-color:var(--teal-600); color:var(--navy-700); box-shadow:0 0 0 2px rgba(20,160,150,.12);}
+.kanban-col h4{margin:2px 6px 4px; font-size:var(--text-sm); color:var(--navy-700); text-transform:uppercase; letter-spacing:.03em; display:flex; align-items:center; gap:6px;}
+.kanban-col .col-count{background:var(--neutral-200); color:var(--navy-700); font-size:11px; font-weight:700; padding:0 6px; border-radius:99px;}
+.kanban-col .col-total{margin:0 6px 10px; font-weight:600;}
 .kanban-col.drag-over{outline:2px dashed var(--teal-600); outline-offset:-4px;}
+.kanban-col.col-won .col-total, .kanban-col.col-won h4{color:var(--success-600);}
+.kanban-col.col-lost h4{color:var(--error-600);}
+
+/* ---- Myyntiputken mahdollisuus-kortti ---- */
+.opp-card{
+  background:var(--panel); border:1px solid var(--border); border-radius:9px; padding:10px 12px; margin-bottom:8px;
+  font-size:var(--text-sm); cursor:grab; box-shadow:var(--shadow-card); display:flex; flex-direction:column; gap:5px;
+}
+.opp-card:active{cursor:grabbing;}
+.opp-card.dragging{opacity:.5;}
+.opp-card.stalled{border-left:3px solid var(--warning-600);}
+.opp-top{display:flex; justify-content:space-between; align-items:flex-start; gap:6px;}
+.opp-name{font-weight:700; color:var(--navy-700); font-size:var(--text-base);}
+.opp-stalled-badge{font-size:10.5px; font-weight:700; color:var(--warning-600); background:var(--warning-100); padding:1px 6px; border-radius:99px; white-space:nowrap;}
+.opp-contact{color:var(--neutral-500); font-size:12.5px;}
+.opp-mid-row{display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:12.5px;}
+.opp-product{color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.opp-value{font-weight:700; color:var(--navy-700); white-space:nowrap;}
+.opp-prob-row{display:flex; align-items:center; gap:6px;}
+.opp-prob-bar{flex:1; height:5px; background:var(--neutral-200); border-radius:99px; overflow:hidden;}
+.opp-prob-fill{height:100%; background:var(--teal-600); border-radius:99px;}
+.opp-prob-pct{font-size:11px; color:var(--neutral-500); font-weight:600; width:32px; text-align:right;}
+.opp-bottom{display:flex; justify-content:space-between; align-items:center;}
+.opp-resp{background:var(--navy-900); color:#fff; font-size:10.5px; font-weight:700; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;}
+.opp-followup{font-size:11.5px; padding:4px 7px; border-radius:6px; background:var(--neutral-100); color:var(--neutral-500);}
+.opp-followup.overdue{background:var(--error-100); color:var(--error-600); font-weight:600;}
+.opp-followup.today{background:var(--warning-100); color:var(--warning-600); font-weight:600;}
+.opp-followup.upcoming{background:var(--teal-100,#e6f6f4); color:var(--teal-ink,var(--teal-600));}
+.opp-followup.missing{background:var(--neutral-100); color:var(--neutral-500); font-style:italic;}
+.row-stalled{background:var(--warning-100);}
+
+/* ---- Forecast-yhteenveto Myyntiputken yläpuolella ---- */
+.forecast-bar{display:flex; gap:14px; flex-wrap:wrap; margin:14px 0;}
+.forecast-stat{
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-lg); padding:10px 16px;
+  display:flex; flex-direction:column; min-width:150px; flex:1;
+}
+.forecast-stat.warn{border-color:var(--warning-600); background:var(--warning-100);}
+.forecast-stat .fs-label{font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--neutral-500);}
+.forecast-stat .fs-value{font-size:var(--text-xl,20px); font-weight:700; color:var(--navy-700);}
+.forecast-stat .fs-value.teal{color:var(--teal-600);}
+.forecast-stat .fs-sub{font-size:11px; color:var(--neutral-500);}
+
+/* ---- Mahdollisuuden sivupaneeli ---- */
+.opp-drawer-section{padding:14px 0; border-bottom:1px solid var(--border);}
+.opp-drawer-section:last-child{border-bottom:none;}
+.opp-drawer-section h4{margin:0 0 8px; font-size:var(--text-sm); text-transform:uppercase; letter-spacing:.03em; color:var(--navy-700);}
+.detail-table{width:100%; border-collapse:collapse; margin:10px 0;}
+.detail-table td{padding:5px 0; font-size:var(--text-sm); border-bottom:1px solid var(--neutral-100); vertical-align:middle;}
+.detail-table td:first-child{color:var(--neutral-500); width:42%;}
+.checkbox-inline{display:flex; align-items:center; gap:6px; font-weight:500;}
+.checkbox-inline input{width:auto;}
 
 /* ---- Follow-ups ---- */
 .followup-cols{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px;}
