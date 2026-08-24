@@ -30,21 +30,46 @@ function adminClient() {
 // Authorization: Bearer <token> -headeristaan, TAI null jos token on
 // virheellinen/vanhentunut. Tämä on ainoa tapa selvittää "kuka soittaa",
 // service role -avain itsessään EI kerro mitään kutsujasta.
+//
+// VÄLIAIKAINEN DIAGNOSTIIKKA (poista kun crm-invite-user-bugi on jäljitetty):
+// getCallerProfile.lastReason kertoo TARKALLEEN missä kohtaa tunnistus
+// kaatui, jotta 401-vastauksessa voidaan näyttää syy sen sijaan että
+// arvaillaan. Ei sisällä tokenia eikä muuta salaista.
 async function getCallerProfile(event) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  if (!token) return null;
+  if (!token) {
+    getCallerProfile.lastReason = 'Authorization-header puuttuu kokonaan tai on tyhjä.';
+    return null;
+  }
 
-  const admin = adminClient();
+  let admin;
+  try {
+    admin = adminClient();
+  } catch (err) {
+    getCallerProfile.lastReason = `adminClient()-alustus epäonnistui: ${String((err && err.message) || err)}`;
+    return null;
+  }
+
   const { data: userData, error: userErr } = await admin.auth.getUser(token);
-  if (userErr || !userData || !userData.user) return null;
+  if (userErr || !userData || !userData.user) {
+    getCallerProfile.lastReason = `admin.auth.getUser(token) epäonnistui: ${userErr ? userErr.message : 'ei käyttäjää palautettu'}`;
+    return null;
+  }
 
   const { data: profile, error: profileErr } = await admin
     .from('profiles')
     .select('id, organization_id, role, active')
     .eq('id', userData.user.id)
     .single();
-  if (profileErr || !profile || !profile.active) return null;
+  if (profileErr || !profile) {
+    getCallerProfile.lastReason = `profiles-haku epäonnistui käyttäjälle ${userData.user.id}: ${profileErr ? profileErr.message : 'ei riviä'}`;
+    return null;
+  }
+  if (!profile.active) {
+    getCallerProfile.lastReason = `profiili löytyi (${profile.email || profile.id}) mutta active=false.`;
+    return null;
+  }
 
   return profile;
 }
