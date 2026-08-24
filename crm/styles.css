@@ -169,7 +169,7 @@ textarea:focus-visible, [tabindex]:focus-visible{
 .drawer-overlay{position:fixed; inset:0; background:rgba(22,31,56,.4); z-index:80;}
 .drawer{
   position:fixed; right:0; top:0; bottom:0; width:min(340px,88vw); background:var(--panel);
-  box-shadow:var(--shadow-elevated); z-index:81; padding:var(--space-5); overflow-y:auto;
+  box-shadow:var(--shadow-elevated); z-index:81; padding:var(--space-5); overflow-y:auto; overflow-x:hidden;
 }
 
 /* ---- App shell: sivupalkki + sisältöpylväs ---- */
@@ -260,8 +260,10 @@ textarea:focus-visible, [tabindex]:focus-visible{
 .view-toggle-btn{background:var(--panel); border:none; padding:6px 12px; font-size:var(--text-xs); font-weight:600; color:var(--neutral-500);}
 .view-toggle-btn.active{background:var(--navy-700); color:#fff;}
 .drawer-filter-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; margin-top:var(--space-4);}
-.drawer-filter-grid label{display:flex; flex-direction:column; gap:4px; font-size:var(--text-sm); font-weight:600; color:var(--navy-700);}
-.drawer-filter-grid input, .drawer-filter-grid select{padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);}
+.drawer-filter-grid label{display:flex; flex-direction:column; gap:4px; font-size:var(--text-sm); font-weight:600; color:var(--navy-700); min-width:0;}
+.drawer-filter-grid input, .drawer-filter-grid select{
+  width:100%; min-width:0; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);
+}
 @media (max-width:600px){ .drawer-filter-grid{grid-template-columns:1fr;} }
 
 /* ---- Owner: Company Search kortin osiot ---- */
@@ -319,6 +321,12 @@ h3{color:var(--navy-700); font-size:var(--text-md);}
 .kanban-card:active{cursor:grabbing;}
 .kanban-card .kc-name{font-weight:700; color:var(--navy-700); font-size:var(--text-base);}
 .kanban-card .kc-meta{color:var(--neutral-500); font-size:var(--text-sm); margin-top:3px;}
+.kc-value-input{
+  width:100%; border:1px solid transparent; background:transparent; padding:2px 4px; margin:-2px -4px;
+  font-size:var(--text-sm); color:var(--neutral-500); border-radius:6px; cursor:text; font-family:inherit;
+}
+.kc-value-input:hover{background:var(--neutral-50); border-color:var(--border);}
+.kc-value-input:focus{outline:none; background:var(--panel); border-color:var(--teal-600); color:var(--navy-700); box-shadow:0 0 0 2px rgba(20,160,150,.12);}
 .kanban-col.drag-over{outline:2px dashed var(--teal-600); outline-offset:-4px;}
 
 /* ---- Follow-ups ---- */

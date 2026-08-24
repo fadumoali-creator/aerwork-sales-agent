@@ -36,6 +36,31 @@ function money(n, currency) {
   return new Intl.NumberFormat('fi-FI', { style: 'currency', currency: currency || 'EUR' }).format(n);
 }
 
+// PRH/YTJ v3 -rajapinnan address.postOffices on lista SAMAN paikkakunnan
+// nimestä eri kielillä (languageCode: 1 = suomi, 2 = ruotsi, 3 = englanti),
+// ei useita eri paikkakuntia. Otettiin aiemmin virheellisesti vain
+// postOffices[0] — järjestys ei ole taattu, joten kaupunki saattoi näkyä
+// esim. ruotsiksi ("Helsingfors") eikä täsmännyt suomenkieliseen hakuun.
+// Tämä valitsee aina ensisijaisesti suomenkielisen nimen.
+function resolvePrhCity(address) {
+  const list = (address && address.postOffices) || [];
+  if (!list.length) return null;
+  const fi = list.find((po) => String(po.languageCode) === '1');
+  return (fi || list[0]).city || null;
+}
+
+// Kauppalehden yrityssivu Y-tunnuksen perusteella (esim.
+// https://www.kauppalehti.fi/yritykset/yritys/01845830 Y-tunnukselle
+// 0184583-0). Vain linkki käyttäjälle avattavaksi — ei mitään automaattista
+// hakua/skreippausta Kauppalehden sivulta (heidän yritystietonsa on oma
+// kaupallinen tuotteensa, ks. myös lukittu liikevaihtosuodatin).
+function kauppalehtiCompanyUrl(businessId) {
+  if (!businessId) return null;
+  const digitsOnly = String(businessId).replace(/[^0-9]/g, '');
+  if (!digitsOnly) return null;
+  return `https://www.kauppalehti.fi/yritykset/yritys/${digitsOnly}`;
+}
+
 // ---------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------
@@ -307,17 +332,25 @@ function wireOwnerSearchChrome() {
   $('#ownerFiltersDrawerClose').addEventListener('click', closeFiltersDrawer);
   $('#ownerFiltersDrawerOverlay').addEventListener('click', closeFiltersDrawer);
   $('#ownerFiltersDrawerApply').addEventListener('click', () => {
+    const prevCity = ownerSearchFilters.city;
     ownerSearchFilters = {
       city: $('#fCity').value.trim(), industry: $('#fIndustry').value.trim(),
       crm: $('#fCrm').value, dm: $('#fDm').value, sort: $('#fSort').value
     };
     closeFiltersDrawer();
-    renderOwnerSearchResults();
+    // Kaupunki haetaan PRH:sta itse (location-parametri), ei vain
+    // jälkikäteissuodateta - jos kaupunki muuttui, pitää hakea uudestaan.
+    // Muut suotimet (toimiala/CRM/päättäjä/järjestys) suodattavat jo
+    // haettua tulosjoukkoa, eivät vaadi uutta hakua.
+    if (ownerSearchFilters.city !== prevCity) runOwnerCompanySearch();
+    else renderOwnerSearchResults();
   });
   $('#ownerClearFiltersBtn').addEventListener('click', () => {
+    const prevCity = ownerSearchFilters.city;
     ownerSearchFilters = { city: '', industry: '', crm: '', dm: '', sort: 'default' };
     $('#fCity').value = ''; $('#fIndustry').value = ''; $('#fCrm').value = ''; $('#fDm').value = ''; $('#fSort').value = 'default';
-    renderOwnerSearchResults();
+    if (prevCity) runOwnerCompanySearch();
+    else renderOwnerSearchResults();
   });
   $$('.view-toggle-btn', $('#ownerSearchViewToggle')).forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -714,7 +747,12 @@ async function loadPipeline() {
         ${cardsInCol.map((c) => `
           <div class="kanban-card" draggable="true" data-company-id="${c.id}">
             <div class="kc-name">${escapeHtml(c.name)}</div>
-            <div class="kc-meta">${money(c.estimated_value, c.currency)}</div>
+            <div class="kc-meta">
+              <input type="number" class="kc-value-input" draggable="false"
+                     data-company-id="${c.id}" data-prev-value="${c.estimated_value ?? ''}"
+                     value="${c.estimated_value ?? ''}" min="0" step="100"
+                     placeholder="Lisää arvo (€)" title="Arvioitu arvo — tallentuu automaattisesti" />
+            </div>
           </div>`).join('')}
       </div>`;
   }).join('');
@@ -722,6 +760,35 @@ async function loadPipeline() {
   $$('.kanban-card', board).forEach((card) => {
     card.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', card.dataset.companyId);
+    });
+  });
+  $$('.kc-value-input', board).forEach((input) => {
+    // Estetään kortin raahaus kun käyttäjä muokkaa kenttää (input on
+    // draggable="false", mutta klikkaus/kirjoitus pitää silti pysäyttää
+    // ettei kortin oma dragstart-kuuntelija häiritse tekstivalintaa).
+    input.addEventListener('mousedown', (e) => e.stopPropagation());
+    input.addEventListener('click', (e) => e.stopPropagation());
+    const save = async () => {
+      const prev = input.dataset.prevValue;
+      const raw = input.value.trim();
+      const next = raw === '' ? null : Number(raw);
+      if (String(next ?? '') === String(prev ?? '')) return; // ei muutosta
+      // Kirjoitus companies-tauluun laukaisee audit_log-triggerin automaattisesti.
+      const { error: updErr } = await supabase
+        .from('companies')
+        .update({ estimated_value: next })
+        .eq('id', input.dataset.companyId);
+      if (updErr) {
+        alert(`Arvon tallennus epäonnistui: ${updErr.message}`);
+        input.value = prev;
+        return;
+      }
+      input.dataset.prevValue = next ?? '';
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') input.blur();
+      if (e.key === 'Escape') { input.value = input.dataset.prevValue; input.blur(); }
     });
   });
   $$('.kanban-col', board).forEach((col) => {
@@ -969,8 +1036,14 @@ async function runOwnerCompanySearch() {
   const resultsEl = $('#ownerSearchResults');
   $('#ownerSearchMetaRow').classList.add('hidden');
 
-  if (!input) {
-    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Anna hakusana</div>Hae yrityksen nimellä tai Y-tunnuksella (esim. 1234567-8).</div>';
+  // Kaupunkisuodatin (Advanced Filters) haetaan PRH:n omalla
+  // location-parametrilla - tukee useaa kaupunkia pilkulla erotettuna
+  // (OR-haku, ks. owner-prh-search.js). Haku voi siis toimia joko
+  // nimellä/Y-tunnuksella, kaupungilla, tai molemmilla yhdessä.
+  const locations = (ownerSearchFilters.city || '').split(',').map((c) => c.trim()).filter(Boolean);
+
+  if (!input && !locations.length) {
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Anna hakusana tai kaupunki</div>Hae yrityksen nimellä, Y-tunnuksella (esim. 1234567-8), tai valitse kaupunki Lisää suotimet -valikosta.</div>';
     return;
   }
   const isBusinessId = BUSINESS_ID_PATTERN.test(input);
@@ -979,12 +1052,16 @@ async function runOwnerCompanySearch() {
   resultsEl.innerHTML = Array.from({ length: 4 }, () => `
     <div class="search-card"><div class="skeleton skeleton-line short"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-card"></div></div>`).join('');
 
+  const body = {};
+  if (input) { if (isBusinessId) body.business_id = input; else body.name = input; }
+  if (locations.length) body.locations = locations;
+
   let resp, result;
   try {
     resp = await fetch('/.netlify/functions/owner-prh-search', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify(isBusinessId ? { business_id: input } : { name: input })
+      body: JSON.stringify(body)
     });
     result = await resp.json();
   } catch (err) {
@@ -996,7 +1073,7 @@ async function runOwnerCompanySearch() {
     return;
   }
   if (!result.results.length) {
-    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei tuloksia</div>Tarkista kirjoitusasu tai kokeile Y-tunnuksella (muoto 1234567-8).</div>';
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei tuloksia</div>Tarkista kirjoitusasu, kokeile Y-tunnuksella (muoto 1234567-8), tai laajenna kaupunkihakua.</div>';
     return;
   }
 
@@ -1008,10 +1085,13 @@ async function runOwnerCompanySearch() {
 
 function filteredSortedOwnerSearchResults() {
   const f = ownerSearchFilters;
+  // Huom: kaupunkisuodatin EI enää suodata tätä listaa jälkikäteen - se
+  // haetaan PRH:sta suoraan location-parametrilla (ks. runOwnerCompanySearch),
+  // joten lastOwnerSearchResults täsmää jo kaupunkiin. Jälkikäteissuodatus
+  // poistettiin koska client-puolen postOffices-teksti ei aina täsmää
+  // täsmälleen PRH:n oman location-haun logiikkaan (esim. käynti- vs.
+  // postiosoite), mikä piilotti aidosti oikeita tuloksia.
   let rows = lastOwnerSearchResults.filter((r) => {
-    const address = (r.addresses || [])[0] || {};
-    const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : '';
-    if (f.city && !(city || '').toLowerCase().includes(f.city.toLowerCase())) return false;
     if (f.industry && !(r.main_business_line || '').toLowerCase().includes(f.industry.toLowerCase())) return false;
     if (f.crm === 'in_crm' && !r.in_crm) return false;
     if (f.crm === 'not_in_crm' && r.in_crm) return false;
@@ -1072,7 +1152,7 @@ function decisionMakerBlockHtml(dm) {
 function searchCardHtml(r) {
   const idx = lastOwnerSearchResults.indexOf(r);
   const address = (r.addresses || [])[0] || {};
-  const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : null;
+  const city = resolvePrhCity(address);
 
   return `
     <div class="search-card" data-idx="${idx}">
@@ -1106,6 +1186,7 @@ function searchCardHtml(r) {
             ${r.in_crm ? `<button data-action="open-company" data-idx="${idx}">Näytä yritys</button>` : ''}
             <button data-action="find-dm" data-idx="${idx}">${r.in_crm ? 'Etsi päättäjä' : 'Lisää CRM:ään ja etsi päättäjä'}</button>
             ${r.business_id ? `<button data-action="open-source" data-idx="${idx}">Avaa lähde (PRH-data)</button>` : ''}
+            ${r.business_id ? `<button data-action="open-kauppalehti" data-idx="${idx}">Avaa Kauppalehdessä ↗</button>` : ''}
           </div>
         </div>
       </div>
@@ -1120,7 +1201,7 @@ function searchTableHtml(rows) {
       <tbody>${rows.map((r) => {
         const idx = lastOwnerSearchResults.indexOf(r);
         const address = (r.addresses || [])[0] || {};
-        const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : '—';
+        const city = resolvePrhCity(address) || '—';
         return `<tr>
           <td>${escapeHtml(r.name || '—')}</td>
           <td>${escapeHtml(r.business_id || '—')}</td>
@@ -1150,6 +1231,11 @@ function wireSearchResultActions(resultsEl) {
   $$('[data-action="open-source"]', resultsEl).forEach((btn) => {
     const r = lastOwnerSearchResults[Number(btn.dataset.idx)];
     btn.addEventListener('click', () => window.open(`https://avoindata.prh.fi/opendata-ytj-api/v3/companies?businessId=${encodeURIComponent(r.business_id)}`, '_blank', 'noopener'));
+  });
+  $$('[data-action="open-kauppalehti"]', resultsEl).forEach((btn) => {
+    const r = lastOwnerSearchResults[Number(btn.dataset.idx)];
+    const url = kauppalehtiCompanyUrl(r.business_id);
+    if (url) btn.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
   });
   $$('[data-action="toggle-more"]', resultsEl).forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -1220,7 +1306,7 @@ async function addExternalResultToCrm(record, opts = {}) {
     name: record.name,
     business_id: record.business_id,
     country: 'FI',
-    city: address.postOffices && address.postOffices[0] ? address.postOffices[0].city : null,
+    city: resolvePrhCity(address),
     industry: record.main_business_line || null,
     status_id: leadStatuses.find((s) => s.key === 'new_lead')?.id || null,
     currency: 'EUR',
