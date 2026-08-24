@@ -13,6 +13,9 @@ let session = null;
 let profile = null; // { id, organization_id, role, name, email }
 let leadStatuses = [];
 let companiesCache = [];
+let isOwner = false; // vahvistettu palvelimelta (is_owner_super_admin() RPC), ei koskaan pelkkä UI-oletus
+
+const AERWORK_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -109,6 +112,19 @@ async function afterLogin() {
     $$('.admin-only').forEach((el) => el.classList.remove('hidden'));
   }
 
+  // Owner Super Admin -kolmoisportin VIIMEINEN vahvistus tulee aina palvelimelta
+  // (RPC kutsuu is_owner_super_admin(), joka tarkistaa roolin JA owner_allowlistin).
+  // Pelkkä profile.role==='owner_super_admin' EI koskaan riitä UI:ssakaan -
+  // jos allowlist puuttuu, palvelin palauttaa false eikä owner-näkymiä näytetä.
+  if (profile.role === 'owner_super_admin') {
+    const { data: ownerConfirmed } = await supabase.rpc('is_owner_super_admin');
+    isOwner = ownerConfirmed === true;
+  }
+  if (isOwner) {
+    $$('.owner-only').forEach((el) => el.classList.remove('hidden'));
+    $('#whoRole').classList.add('owner-badge');
+  }
+
   const { data: statuses } = await supabase.from('lead_statuses').select('*').order('sort_order');
   leadStatuses = statuses || [];
   fillStatusFilter();
@@ -149,6 +165,9 @@ async function switchView(view) {
   if (view === 'pipeline') await loadPipeline();
   if (view === 'followups') await loadFollowups();
   if (view === 'users') await loadUsers();
+  if (view === 'owner-overview') await loadOwnerOverview();
+  if (view === 'owner-search') { /* haku käynnistyy vasta napista, ei automaattisesti */ }
+  if (view === 'owner-audit') await loadOwnerAuditLog();
 }
 
 function wireModals() {
@@ -162,6 +181,9 @@ function wireModals() {
   $('#statusFilter').addEventListener('change', renderCompanyList);
   $('#exportCsvBtn').addEventListener('click', exportCompaniesCsv);
   $('#inviteUserBtn').addEventListener('click', openInviteUserModal);
+  $('#ownerSearchBtn').addEventListener('click', runOwnerCompanySearch);
+  $('#ownerAuditRefreshBtn').addEventListener('click', loadOwnerAuditLog);
+  $('#ownerAuditTableFilter').addEventListener('change', loadOwnerAuditLog);
 }
 
 function fillStatusFilter() {
@@ -400,6 +422,17 @@ async function openCompanyModal(id) {
 
   const nextFollowup = (followups || [])[0];
 
+  let ownerSection = { decisionMakers: [], jobPostings: [], opportunityScore: null, partners: [] };
+  if (isOwner) {
+    const [{ data: dms }, { data: jobs }, { data: score }, { data: partners }] = await Promise.all([
+      supabase.from('decision_makers').select('*').eq('company_id', id).order('found_at', { ascending: false }),
+      supabase.from('job_postings').select('*').eq('company_id', id).order('first_seen_at', { ascending: false }),
+      supabase.from('opportunity_scores').select('*').eq('company_id', id).maybeSingle(),
+      supabase.from('organizations').select('id, name').eq('type', 'certified_partner')
+    ]);
+    ownerSection = { decisionMakers: dms || [], jobPostings: jobs || [], opportunityScore: score || null, partners: partners || [] };
+  }
+
   body.innerHTML = `
     <h3>${escapeHtml(company.name)}</h3>
     <p class="muted small">${escapeHtml(company.city || '')} ${escapeHtml(company.country || '')} · ${escapeHtml(company.industry || 'toimiala tuntematon')}</p>
@@ -446,7 +479,11 @@ async function openCompanyModal(id) {
         </div>
       `).join('') : '<p class="muted">Ei vielä aktiviteetteja.</p>'}
     </div>
+
+    ${isOwner ? ownerCompanySectionHtml(company, ownerSection) : ''}
   `;
+
+  if (isOwner) wireOwnerCompanySection(id, company, ownerSection);
 
   $('#newActivityForm', body).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -677,6 +714,416 @@ function openInviteUserModal() {
   });
 
   $('#genericModal').classList.remove('hidden');
+}
+
+// =================================================================
+// OWNER SUPER ADMIN — kaikki tämän lohkon toiminnot vaativat isOwner===true
+// JA RLS-eristys owner-only-tauluihin (ks. supabase/migrations/0002_owner_super_admin.sql).
+// isOwner asetetaan afterLogin():ssä VAIN palvelimen RPC-vastauksen perusteella,
+// ei koskaan pelkän profile.role-kentän mukaan.
+// =================================================================
+
+// ---------------------------------------------------------------
+// Owner Overview
+// ---------------------------------------------------------------
+
+async function loadOwnerOverview() {
+  const grid = $('#ownerKpiGrid');
+  grid.innerHTML = '<p class="muted">Ladataan…</p>';
+
+  const today = todayISO();
+  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+
+  const [
+    { count: totalCompanies }, { count: newLeadCount }, { count: newThisWeek },
+    { data: activitiesWeek }, { data: noContact }, { data: overdueFollowups },
+    { data: deals }, { data: openJobsHigh }, { data: pendingDMs }, { data: partners }
+  ] = await Promise.all([
+    supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null),
+    supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null)
+      .eq('status_id', leadStatuses.find((s) => s.key === 'new_lead')?.id || '00000000-0000-0000-0000-000000000000'),
+    supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null).gte('created_at', weekAgo),
+    supabase.from('activities').select('id', { count: 'exact', head: true }).gte('occurred_at', weekAgo),
+    supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null).is('last_contacted_at', null),
+    supabase.from('followup_tasks').select('id', { count: 'exact', head: true }).eq('status', 'open').lt('due_date', today),
+    supabase.from('deals').select('mrr, arr, commission_amount, partner_id').is('archived_at', null),
+    supabase.from('job_postings').select('company_id').eq('status', 'open'),
+    supabase.from('decision_makers').select('id', { count: 'exact', head: true }).eq('review_status', 'pending'),
+    supabase.from('organizations').select('id, name').eq('type', 'certified_partner')
+  ]);
+
+  const totalMrr = (deals || []).reduce((s, d) => s + (Number(d.mrr) || 0), 0);
+  const totalArr = (deals || []).reduce((s, d) => s + (Number(d.arr) || 0), 0);
+  const totalCommission = (deals || []).reduce((s, d) => s + (Number(d.commission_amount) || 0), 0);
+  const jobCountByCompany = {};
+  (openJobsHigh || []).forEach((j) => { if (j.company_id) jobCountByCompany[j.company_id] = (jobCountByCompany[j.company_id] || 0) + 1; });
+  const highJobCompanies = Object.values(jobCountByCompany).filter((n) => n >= 5).length;
+
+  const cards = [
+    { label: 'Yrityksiä CRM:ssä', value: totalCompanies ?? 0 },
+    { label: 'Uudet liidit', value: newLeadCount ?? 0 },
+    { label: 'Uudet yritykset (7pv)', value: newThisWeek ?? 0 },
+    { label: 'Yhteydenotot (7pv)', value: (activitiesWeek || []).length },
+    { label: 'Ei koskaan kontaktoitu', value: noContact?.length ?? 0, alert: (noContact?.length ?? 0) > 0 },
+    { label: 'Myöhässä olevat follow-upit', value: overdueFollowups?.length ?? 0, alert: (overdueFollowups?.length ?? 0) > 0 },
+    { label: 'Yrityksiä ≥5 avoimella työpaikalla', value: highJobCompanies },
+    { label: 'Vahvistamattomat päättäjät', value: pendingDMs?.length ?? 0 },
+    { label: 'AerWork MRR', value: money(totalMrr) },
+    { label: 'AerWork ARR', value: money(totalArr) },
+    { label: 'Partnerikomissiot (avoin)', value: money(totalCommission) }
+  ];
+
+  grid.innerHTML = cards.map((c) => `
+    <div class="kpi-card ${c.alert ? 'alert' : ''}">
+      <div class="kpi-value">${c.value}</div>
+      <div class="kpi-label">${c.label}</div>
+    </div>`).join('');
+
+  const { data: allCompanies } = await supabase.from('companies').select('owning_partner_id').is('archived_at', null);
+  const rows = (partners || []).map((p) => {
+    const count = (allCompanies || []).filter((c) => c.owning_partner_id === p.id).length;
+    const partnerDeals = (deals || []).filter((d) => d.partner_id === p.id);
+    const mrr = partnerDeals.reduce((s, d) => s + (Number(d.mrr) || 0), 0);
+    return `<tr><td>${escapeHtml(p.name)}</td><td>${count}</td><td>${money(mrr)}</td></tr>`;
+  }).join('');
+  $('#ownerPartnerActivity').innerHTML = `
+    <table class="data"><thead><tr><th>Certified Partner</th><th>Yrityksiä</th><th>MRR</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="3">Ei partnereita vielä.</td></tr>'}</tbody></table>`;
+}
+
+// ---------------------------------------------------------------
+// Company Search (PRH/YTJ) + Lisää CRM:ään
+// ---------------------------------------------------------------
+
+async function runOwnerCompanySearch() {
+  const name = $('#ownerSearchName').value.trim();
+  const businessId = $('#ownerSearchBusinessId').value.trim();
+  const resultsEl = $('#ownerSearchResults');
+
+  if (!name && !businessId) {
+    resultsEl.innerHTML = '<p class="muted">Anna yrityksen nimi tai Y-tunnus.</p>';
+    return;
+  }
+  resultsEl.innerHTML = '<p class="muted">Haetaan PRH/YTJ:stä…</p>';
+
+  let resp, result;
+  try {
+    resp = await fetch('/.netlify/functions/owner-prh-search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ name: name || undefined, business_id: businessId || undefined })
+    });
+    result = await resp.json();
+  } catch (err) {
+    resultsEl.innerHTML = `<p class="error-text">Haku epäonnistui: ${err.message}</p>`;
+    return;
+  }
+  if (!resp.ok) {
+    resultsEl.innerHTML = `<p class="error-text">${escapeHtml(result.error || 'Haku epäonnistui.')}</p>`;
+    return;
+  }
+  if (!result.results.length) {
+    resultsEl.innerHTML = '<p class="muted">Ei tuloksia. Tarkista kirjoitusasu tai kokeile Y-tunnuksella.</p>';
+    return;
+  }
+
+  resultsEl.innerHTML = result.results.map((r, idx) => `
+    <div class="company-card" data-idx="${idx}" style="cursor:default;">
+      <div class="cc-main">
+        <div class="cc-name">${escapeHtml(r.name || '(nimi tuntematon)')}</div>
+        <div class="cc-sub">Y-tunnus: ${escapeHtml(r.business_id || '—')} · ${escapeHtml(r.company_form || '')} · rekisteröity ${fmtDate(r.registration_date)}</div>
+        <div class="muted small">Lähde: virallinen rekisteri (PRH/YTJ) · haettu ${fmtDateTime(result.fetched_at)}</div>
+      </div>
+      <div class="cc-meta">
+        <button class="btn-primary small" data-action="add-to-crm" data-idx="${idx}">Lisää CRM:ään</button>
+      </div>
+    </div>`).join('');
+
+  $$('[data-action="add-to-crm"]', resultsEl).forEach((btn) => {
+    btn.addEventListener('click', () => addExternalResultToCrm(result.results[Number(btn.dataset.idx)]));
+  });
+}
+
+async function addExternalResultToCrm(record) {
+  const address = (record.addresses || [])[0] || {};
+
+  // Duplikaattitarkistus AINA ennen lisäystä (kohta 10) - uudelleenkäyttää samaa
+  // fn_check_company_duplicate-funktiota kuin tavallinen "Uusi yritys" -lomake.
+  const { data: dup } = await supabase.rpc('fn_check_company_duplicate', {
+    p_name: record.name, p_business_id: record.business_id, p_website: null, p_email: null, p_phone: null
+  });
+
+  if (dup && dup.duplicate) {
+    const proceed = confirm(
+      `${dup.message}${dup.owner_partner_name ? `\nOmistava partneri: ${dup.owner_partner_name}` : ''}\n\n` +
+      `Yritystä ei lisätä uudelleen. Avataanko olemassa oleva yritys?`
+    );
+    if (proceed && dup.company_id) await openCompanyModal(dup.company_id);
+    return;
+  }
+
+  const { data: newCompany, error } = await supabase.from('companies').insert({
+    owning_partner_id: AERWORK_ORG_ID, // "pitää liidin vain AerWorkin omassa hallinnassa" kunnes osoitetaan partnerille
+    name: record.name,
+    business_id: record.business_id,
+    country: 'FI',
+    city: address.postOffices && address.postOffices[0] ? address.postOffices[0].city : null,
+    industry: record.main_business_line || null,
+    status_id: leadStatuses.find((s) => s.key === 'new_lead')?.id || null,
+    currency: 'EUR',
+    lead_source: 'owner_company_search',
+    created_by: profile.id
+  }).select().single();
+
+  if (error) {
+    alert(`Lisäys epäonnistui: ${error.message}`);
+    return;
+  }
+
+  // Säilytetään alkuperäinen lähdetieto pysyvästi, ei koskaan ylikirjoiteta.
+  await supabase.from('external_company_records').insert({
+    company_id: newCompany.id,
+    business_id: record.business_id,
+    name: record.name,
+    source: 'prh_ytj',
+    raw_payload: record.raw || record,
+    confidence: 'virallinen_rekisteri',
+    fetched_at: new Date().toISOString(),
+    last_verified_at: new Date().toISOString(),
+    created_by: profile.id
+  });
+
+  alert(`"${record.name}" lisätty CRM:ään.`);
+  await openCompanyModal(newCompany.id);
+}
+
+// ---------------------------------------------------------------
+// Yrityksen 360°-näkymän Owner-osio: Päättäjät, Avoimet työpaikat,
+// Opportunity Score, Liidin osoittaminen partnerille
+// ---------------------------------------------------------------
+
+// Peilaa crm/lib/opportunityScore.js:n (tests/opportunity-score.test.js testattu)
+// painotuksia. PIDÄ SYNKASSA jos jompaakumpaa muutetaan - selaimessa ei voida
+// suoraan require()-tuoda CommonJS-moduulia ilman build-vaihetta (sama rajoitus
+// koskee crm/lib/calc.js:ää, jota app.js ei myöskään tuo suoraan).
+function calcOpportunityScoreClient(company, jobPostings, decisionMakers) {
+  if (company.has_active_contract) {
+    return { score: 0, tier: 'matala', signals: [], missing_data: [], recommended_product: null,
+      recommended_action: 'Ei uutta myyntitoimenpidettä - asiakas on jo aktiivinen.',
+      rationale: 'Yrityksellä on voimassa oleva sopimus.' };
+  }
+  const signals = []; const missing = [];
+  const openJobs = (jobPostings || []).filter((j) => j.status === 'open');
+  if (openJobs.length >= 3) signals.push({ signal: 'multiple_open_jobs', points: 15, evidence: `${openJobs.length} avointa työpaikkaa.` });
+  const hrJobs = openJobs.filter((j) => j.is_hr_related || j.is_payroll_related || j.is_recruiting_related);
+  if (hrJobs.length) signals.push({ signal: 'hr_payroll_ops_hiring', points: 15, evidence: `${hrJobs.length} HR/palkanlaskenta/rekrytointi-roolia.` });
+  const shiftJobs = openJobs.filter((j) => j.is_shift_work);
+  if (shiftJobs.length) signals.push({ signal: 'shift_heavy', points: 15, evidence: `${shiftJobs.length} vuorotyötehtävää.` });
+  const industry = (company.industry || '').toLowerCase();
+  const targetKw = ['hoiva', 'terveys', 'henkilöstö', 'henkilostopalvelu', 'staffing', 'ravintola', 'hotelli', 'majoitus', 'siivous', 'turvallisuus', 'vartiointi', 'palvelu', 'kotihoito', 'hoitokoti'];
+  if (targetKw.some((k) => industry.includes(k))) signals.push({ signal: 'target_industry', points: 15, evidence: `Toimiala "${company.industry}".` });
+  else if (!company.industry) missing.push('industry_unknown');
+  if ((decisionMakers || []).length) signals.push({ signal: 'decision_maker_found', points: 5, evidence: `${decisionMakers.length} päättäjä löydetty.` });
+  else missing.push('no_decision_maker_found');
+  if (!openJobs.length && !(jobPostings || []).length) missing.push('open_jobs_not_checked');
+
+  const score = Math.max(0, Math.min(100, signals.reduce((s, x) => s + x.points, 0)));
+  const tier = score >= 60 ? 'korkea' : score >= 30 ? 'keskitaso' : 'matala';
+  const recommendedProduct = shiftJobs.length ? 'AerShift (AI-työvuorosuunnittelu)'
+    : hrJobs.some((j) => j.is_recruiting_related) ? 'AI-rekrytoija'
+    : hrJobs.length ? 'Kevyt HR / AerPay' : null;
+
+  return {
+    score, tier, signals, missing_data: missing, recommended_product: recommendedProduct,
+    recommended_action: tier === 'korkea' ? 'Priorisoi ensikontakti.' : tier === 'keskitaso' ? 'Lisää seurantalistalle.' : 'Ei kiireellinen.',
+    rationale: `${signals.length} havaittua signaalia (${score}/100). AI-avusteinen ANALYYSI, ei vahvistettu tosiasia - ${missing.length} tietoa puuttuu.`
+  };
+}
+
+function ownerCompanySectionHtml(company, section) {
+  const { decisionMakers, jobPostings, opportunityScore, partners } = section;
+  return `
+    <h3 style="margin-top:24px;">🔒 Owner: Päättäjät</h3>
+    <div class="timeline">
+      ${decisionMakers.length ? decisionMakers.map((d) => `
+        <div class="timeline-item">
+          <div class="ti-head"><span class="ti-channel">${escapeHtml(d.title || '')}</span><span>${d.review_status}</span></div>
+          <p class="ti-summary">${escapeHtml(d.name)} ${d.linkedin_url ? `— <a href="${escapeHtml(d.linkedin_url)}" target="_blank" rel="noopener">LinkedIn</a>` : ''}</p>
+          <p class="muted small">Lähde: ${escapeHtml(d.source)} (${d.confidence}) — löydetty ${fmtDate(d.found_at)}</p>
+          ${d.review_status === 'pending' ? `
+            <button class="btn-ghost small" data-dm-action="approve" data-dm-id="${d.id}">Hyväksy</button>
+            <button class="btn-ghost small" data-dm-action="reject" data-dm-id="${d.id}">Hylkää</button>` : ''}
+        </div>`).join('') : '<p class="muted small">Ei vielä löydettyjä päättäjiä.</p>'}
+    </div>
+    <form id="newDecisionMakerForm" class="form-grid" style="margin-top:10px;">
+      <label>Nimi *<input required name="name" /></label>
+      <label>Titteli<input name="title" /></label>
+      <label>LinkedIn-URL<input name="linkedin_url" /></label>
+      <label>Lähde *<input required name="source" placeholder="esim. yrityksen verkkosivu" /></label>
+      <label>Luotettavuus
+        <select name="confidence">
+          <option value="yrityksen_oma_julkaisu">Yrityksen oma julkaisu</option>
+          <option value="muu_julkinen">Muu julkinen lähde</option>
+          <option value="vahvistettu_lisenssi">Vahvistettu lisensoitu lähde</option>
+          <option value="ai_paattely">AI:n päättelemä</option>
+          <option value="vahvistamaton">Vahvistamaton</option>
+        </select>
+      </label>
+      <div class="form-actions full"><button type="submit" class="btn-ghost small">+ Lisää päättäjä</button></div>
+    </form>
+
+    <h3 style="margin-top:24px;">🔒 Owner: Avoimet työpaikat</h3>
+    <div class="timeline">
+      ${jobPostings.length ? jobPostings.map((j) => `
+        <div class="timeline-item">
+          <div class="ti-head"><span class="ti-channel">${j.status}</span><span>${fmtDate(j.published_at)}</span></div>
+          <p class="ti-summary"><a href="${escapeHtml(j.source_url)}" target="_blank" rel="noopener">${escapeHtml(j.title)}</a> — ${escapeHtml(j.location || '')}</p>
+          <p class="muted small">${j.is_shift_work ? 'Vuorotyö · ' : ''}${j.is_hr_related ? 'HR · ' : ''}${j.is_payroll_related ? 'Palkanlaskenta · ' : ''}${j.is_recruiting_related ? 'Rekrytointi · ' : ''}lähde: ${escapeHtml(j.source)}</p>
+        </div>`).join('') : '<p class="muted small">Ei havaittuja avoimia työpaikkoja.</p>'}
+    </div>
+    <form id="newJobPostingForm" class="form-grid" style="margin-top:10px;">
+      <label class="full">Tehtävänimike *<input required name="title" /></label>
+      <label>Sijainti<input name="location" /></label>
+      <label>Alkuperäinen URL *<input required type="url" name="source_url" /></label>
+      <label>Lähde *<input required name="source" placeholder="esim. yrityksen rekrytointisivu" /></label>
+      <label><input type="checkbox" name="is_shift_work" /> Vuorotyö</label>
+      <label><input type="checkbox" name="is_hr_related" /> HR-tehtävä</label>
+      <label><input type="checkbox" name="is_payroll_related" /> Palkanlaskenta</label>
+      <label><input type="checkbox" name="is_recruiting_related" /> Rekrytointi</label>
+      <div class="form-actions full"><button type="submit" class="btn-ghost small">+ Lisää työpaikka</button></div>
+    </form>
+
+    <h3 style="margin-top:24px;">🔒 Owner: AerWork Opportunity Score</h3>
+    <div id="ownerOpportunityScoreBox">
+      ${opportunityScore ? renderOpportunityScore(opportunityScore) : '<p class="muted small">Ei vielä laskettu.</p>'}
+    </div>
+    <button type="button" class="btn-ghost small" id="calcOpportunityScoreBtn">Laske Opportunity Score</button>
+
+    <h3 style="margin-top:24px;">🔒 Owner: Osoita Certified Partnerille</h3>
+    <form id="assignLeadForm" class="form-grid">
+      <label class="full">Certified Partner
+        <select name="assigned_to_partner_id">
+          <option value="">— valitse —</option>
+          ${partners.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Prioriteetti
+        <select name="priority"><option value="A">A</option><option value="B">B</option><option value="C">C</option></select>
+      </label>
+      <label>Omistajuus päättyy<input type="date" name="ownership_expires_at" /></label>
+      <label class="full">Ohje/viesti partnerille<textarea name="instructions" rows="2"></textarea></label>
+      <div class="form-actions full"><button type="submit" class="btn-primary">Osoita liidi</button></div>
+    </form>`;
+}
+
+function renderOpportunityScore(s) {
+  return `
+    <div class="kpi-card ${s.tier === 'korkea' ? 'alert' : ''}" style="max-width:220px;">
+      <div class="kpi-value">${s.score}/100</div>
+      <div class="kpi-label">Potentiaali: ${s.tier}</div>
+    </div>
+    <ul style="margin:10px 0;padding-left:18px;font-size:13px;">
+      ${(s.signals || []).map((sig) => `<li>+${sig.points} ${escapeHtml(sig.evidence)}</li>`).join('')}
+    </ul>
+    <p class="muted small">Puuttuvat tiedot: ${(s.missing_data || []).length ? s.missing_data.join(', ') : 'ei'}</p>
+    ${s.recommended_product ? `<p><strong>Suositeltu tuote:</strong> ${escapeHtml(s.recommended_product)}</p>` : ''}
+    <p class="muted small">${escapeHtml(s.rationale || '')}</p>
+    <p class="muted small" style="font-style:italic;">⚠️ AI-avusteinen analyysi, ei vahvistettu tosiasia.</p>`;
+}
+
+function wireOwnerCompanySection(companyId, company, section) {
+  const body = $('#companyModalBody');
+
+  $('#newDecisionMakerForm', body)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    const { error } = await supabase.from('decision_makers').insert({
+      company_id: companyId, name: payload.name, title: payload.title || null,
+      linkedin_url: payload.linkedin_url || null, source: payload.source, confidence: payload.confidence,
+      review_status: 'pending', created_by: profile.id
+    });
+    if (error) { alert(`Lisäys epäonnistui: ${error.message}`); return; }
+    await openCompanyModal(companyId);
+  });
+
+  $$('[data-dm-action]', body).forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const status = btn.dataset.dmAction === 'approve' ? 'approved' : 'rejected';
+      await supabase.from('decision_makers').update({ review_status: status, reviewed_by: profile.id, reviewed_at: new Date().toISOString() }).eq('id', btn.dataset.dmId);
+      await openCompanyModal(companyId);
+    });
+  });
+
+  $('#newJobPostingForm', body)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    const postingKey = `${companyId}::${payload.title}::${payload.location || ''}::${payload.source}`.toLowerCase();
+    const { error } = await supabase.from('job_postings').upsert({
+      company_id: companyId, title: payload.title, location: payload.location || null,
+      source: payload.source, source_url: payload.source_url, posting_key: postingKey,
+      is_shift_work: fd.get('is_shift_work') === 'on', is_hr_related: fd.get('is_hr_related') === 'on',
+      is_payroll_related: fd.get('is_payroll_related') === 'on', is_recruiting_related: fd.get('is_recruiting_related') === 'on',
+      last_checked_at: new Date().toISOString()
+    }, { onConflict: 'posting_key' });
+    if (error) { alert(`Lisäys epäonnistui: ${error.message}`); return; }
+    await openCompanyModal(companyId);
+  });
+
+  $('#calcOpportunityScoreBtn', body)?.addEventListener('click', async () => {
+    const result = calcOpportunityScoreClient(company, section.jobPostings, section.decisionMakers);
+    const { error } = await supabase.from('opportunity_scores').upsert({
+      company_id: companyId, score: result.score, tier: result.tier, signals: result.signals,
+      missing_data: result.missing_data, recommended_product: result.recommended_product,
+      recommended_action: result.recommended_action, rationale: result.rationale,
+      calculated_by: profile.id, calculated_at: new Date().toISOString()
+    }, { onConflict: 'company_id' });
+    if (error) { alert(`Tallennus epäonnistui: ${error.message}`); return; }
+    $('#ownerOpportunityScoreBox', body).innerHTML = renderOpportunityScore(result);
+  });
+
+  $('#assignLeadForm', body)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    if (!payload.assigned_to_partner_id) { alert('Valitse Certified Partner.'); return; }
+    const { error } = await supabase.from('lead_assignments').insert({
+      company_id: companyId, assigned_to_partner_id: payload.assigned_to_partner_id,
+      priority: payload.priority, ownership_expires_at: payload.ownership_expires_at || null,
+      instructions: payload.instructions || null, visibility_scope: 'assigned_partner', assigned_by: profile.id
+    });
+    if (error) { alert(`Osoitus epäonnistui: ${error.message}`); return; }
+    alert('Liidi osoitettu partnerille.');
+    e.target.reset();
+  });
+}
+
+// ---------------------------------------------------------------
+// Audit Log (Owner näkee koko historian, ei vain oman partnerin)
+// ---------------------------------------------------------------
+
+async function loadOwnerAuditLog() {
+  const tableFilter = $('#ownerAuditTableFilter').value;
+  let query = supabase.from('audit_log').select('*').order('changed_at', { ascending: false }).limit(200);
+  if (tableFilter) query = query.eq('table_name', tableFilter);
+
+  const { data, error } = await query;
+  if (error) {
+    $('#ownerAuditLog').innerHTML = `<p class="error-text">${error.message}</p>`;
+    return;
+  }
+  $('#ownerAuditLog').innerHTML = `
+    <table class="data">
+      <thead><tr><th>Aika</th><th>Taulu</th><th>Toiminto</th><th>Kenttä</th><th>Vanha</th><th>Uusi</th></tr></thead>
+      <tbody>${(data || []).map((r) => `
+        <tr>
+          <td>${fmtDateTime(r.changed_at)}</td><td>${escapeHtml(r.table_name)}</td><td>${escapeHtml(r.action)}</td>
+          <td>${escapeHtml(r.field_name || '')}</td>
+          <td>${escapeHtml((r.old_value || '').toString().slice(0, 40))}</td>
+          <td>${escapeHtml((r.new_value || '').toString().slice(0, 40))}</td>
+        </tr>`).join('') || '<tr><td colspan="6">Ei tapahtumia.</td></tr>'}</tbody>
+    </table>`;
 }
 
 init();

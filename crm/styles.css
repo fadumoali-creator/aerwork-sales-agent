@@ -83,6 +83,8 @@ input,select,textarea{font-family:inherit; font-size:14px;}
   color:var(--muted); white-space:nowrap;
 }
 .tab.active{background:var(--teal-light); color:var(--navy);}
+.tab-sep{color:var(--border); padding:0 2px; align-self:center;}
+.owner-badge{background:var(--navy); color:#fff;}
 
 main{flex:1; padding:20px; max-width:1200px; margin:0 auto; width:100%;}
 .view{display:none;}
