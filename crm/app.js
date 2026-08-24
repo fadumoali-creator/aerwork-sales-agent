@@ -60,8 +60,8 @@ async function init() {
   });
 
   wireLoginForm();
-  wireNav();
   wireModals();
+  wireSidebarChrome();
 
   if (session) {
     await afterLogin();
@@ -108,9 +108,7 @@ async function afterLogin() {
   $('#whoName').textContent = profile.name;
   $('#whoRole').textContent = roleLabel(profile.role);
 
-  if (['super_admin', 'partner_admin'].includes(profile.role)) {
-    $$('.admin-only').forEach((el) => el.classList.remove('hidden'));
-  }
+  const isAdmin = ['super_admin', 'partner_admin'].includes(profile.role);
 
   // Owner Super Admin -kolmoisportin VIIMEINEN vahvistus tulee aina palvelimelta
   // (RPC kutsuu is_owner_super_admin(), joka tarkistaa roolin JA owner_allowlistin).
@@ -121,9 +119,13 @@ async function afterLogin() {
     isOwner = ownerConfirmed === true;
   }
   if (isOwner) {
-    $$('.owner-only').forEach((el) => el.classList.remove('hidden'));
     $('#whoRole').classList.add('owner-badge');
   }
+
+  // Sivupalkki rakennetaan VASTA nyt, isAdmin/isOwner-tiedon selvittyä -
+  // owner-kohdat eivät koskaan päädy DOM:iin muille käyttäjille (ei pelkkä
+  // CSS-piilotus, ks. index.html:n kommentti).
+  buildSidebarNav(isAdmin);
 
   const { data: statuses } = await supabase.from('lead_statuses').select('*').order('sort_order');
   leadStatuses = statuses || [];
@@ -147,17 +149,98 @@ function roleLabel(role) {
 }
 
 // ---------------------------------------------------------------
-// Navigation
+// Navigation — sivupalkki ryhmiteltynä (CRM / Owner Intelligence /
+// Partner Management / Administration). Rakennetaan täysin JS:ssä käyttäjän
+// vahvistetun roolin mukaan - "access" määrää pääseekö kohta koskaan DOM:iin:
+//   'always' = kaikki kirjautuneet
+//   'admin'  = super_admin / partner_admin (ja owner, ks. RLS-periytyminen)
+//   'owner'  = VAIN palvelimen vahvistama Owner Super Admin
 // ---------------------------------------------------------------
 
-function wireNav() {
-  $$('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => switchView(tab.dataset.view));
+const NAV_CONFIG = [
+  { group: null, items: [
+    { view: 'dashboard', label: 'Dashboard', icon: '◧', access: 'always' },
+    { view: 'companies', label: 'Yritykset', icon: '▤', access: 'always' },
+    { view: 'pipeline', label: 'Myyntiputki', icon: '⇄', access: 'always' },
+    { view: 'followups', label: 'Follow-upit', icon: '◔', access: 'always' }
+  ] },
+  { group: 'Owner Intelligence', items: [
+    { view: 'owner-overview', label: 'Owner Overview', icon: '★', access: 'owner' },
+    { view: 'owner-search', label: 'Company Search', icon: '🔍', access: 'owner' },
+    { view: 'owner-decision-makers', label: 'Decision Makers', icon: '☺', access: 'owner' },
+    { view: 'owner-jobs', label: 'Open Jobs', icon: '▣', access: 'owner' },
+    { view: 'owner-signals', label: 'Opportunity Signals', icon: '⚡', access: 'owner' },
+    { view: 'owner-saved-searches', label: 'Saved Searches', icon: '☆', access: 'owner' }
+  ] },
+  { group: 'Partner Management', items: [
+    { view: 'owner-partners', label: 'Partner Performance', icon: '◫', access: 'owner' }
+  ] },
+  { group: 'Administration', items: [
+    { view: 'owner-data-sources', label: 'Data Sources', icon: '⛁', access: 'owner' },
+    { view: 'owner-audit', label: 'Audit Log', icon: '≡', access: 'owner' },
+    { view: 'users', label: 'Users and Roles', icon: '◎', access: 'admin' },
+    { view: 'owner-settings', label: 'Owner Settings', icon: '⚙', access: 'owner' }
+  ] }
+];
+
+function buildSidebarNav(isAdmin) {
+  const container = $('#sidebarGroups');
+  container.innerHTML = '';
+
+  NAV_CONFIG.forEach((section) => {
+    const visibleItems = section.items.filter((it) => {
+      if (it.access === 'always') return true;
+      if (it.access === 'admin') return isAdmin || isOwner;
+      if (it.access === 'owner') return isOwner;
+      return false;
+    });
+    if (!visibleItems.length) return; // koko ryhmä jää pois DOM:sta jos ei yhtään näkyvää kohtaa
+
+    const groupEl = document.createElement('div');
+    groupEl.className = 'sidebar-nav-group';
+    if (section.group) {
+      const title = document.createElement('div');
+      title.className = 'sidebar-group-title';
+      title.textContent = section.group;
+      groupEl.appendChild(title);
+    }
+    visibleItems.forEach((it) => {
+      const btn = document.createElement('button');
+      btn.className = 'sidebar-item';
+      btn.dataset.view = it.view;
+      btn.innerHTML = `<span class="sidebar-item-icon" aria-hidden="true">${it.icon}</span><span class="sidebar-item-label">${escapeHtml(it.label)}</span>`;
+      btn.addEventListener('click', () => {
+        switchView(it.view);
+        closeMobileNav();
+      });
+      groupEl.appendChild(btn);
+    });
+    container.appendChild(groupEl);
   });
+
+  switchView(NAV_CONFIG[0].items[0].view);
+}
+
+function wireSidebarChrome() {
+  $('#sidebarCollapseBtn').addEventListener('click', () => {
+    $('#sidebar').classList.toggle('collapsed');
+  });
+  $('#mobileNavToggle').addEventListener('click', () => {
+    const open = $('#sidebar').classList.toggle('mobile-open');
+    $('#mobileNavScrim').classList.toggle('visible', open);
+    $('#mobileNavToggle').setAttribute('aria-expanded', String(open));
+  });
+  $('#mobileNavScrim').addEventListener('click', closeMobileNav);
+}
+
+function closeMobileNav() {
+  $('#sidebar').classList.remove('mobile-open');
+  $('#mobileNavScrim').classList.remove('visible');
+  $('#mobileNavToggle').setAttribute('aria-expanded', 'false');
 }
 
 async function switchView(view) {
-  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === view));
+  $$('.sidebar-item').forEach((t) => t.classList.toggle('active', t.dataset.view === view));
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
 
   if (view === 'dashboard') await loadDashboard();

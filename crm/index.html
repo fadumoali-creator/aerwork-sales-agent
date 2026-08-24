@@ -25,39 +25,34 @@
 </div>
 
 <div id="app" class="app hidden">
-  <header class="topbar">
-    <div class="brand">
+<div class="mobile-nav-scrim" id="mobileNavScrim"></div>
+<div class="shell">
+
+  <!-- Sivupalkki rakennetaan KOKONAAN JavaScriptissä (ks. buildSidebarNav()
+       crm/app.js:ssä) käyttäjän vahvistetun roolin mukaan. Owner-osiot eivät
+       koskaan päädy tänne DOM:iin ennen kuin palvelin (is_owner_super_admin()
+       RPC) on vahvistanut kutsujan - ei siis pelkkää CSS-piilotusta. -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
       <div class="avatar-badge">AW</div>
-      <div>
+      <div class="sidebar-brand-text">
         <div class="eyebrow">AerWork</div>
         <div class="title">Certified Partner CRM</div>
       </div>
     </div>
-    <div class="whoami">
-      <span id="whoName" class="who-name"></span>
-      <span id="whoRole" class="badge role-badge"></span>
-      <button id="logoutBtn" class="btn-ghost small">Kirjaudu ulos</button>
-    </div>
-  </header>
+    <div class="sidebar-groups" id="sidebarGroups"></div>
+    <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" aria-label="Pienennä/laajenna sivupalkki">«</button>
+  </aside>
 
-  <nav class="tabs" id="tabs">
-    <button class="tab active" data-view="dashboard">Dashboard</button>
-    <button class="tab" data-view="companies">Yritykset</button>
-    <button class="tab" data-view="pipeline">Myyntiputki</button>
-    <button class="tab" data-view="followups">Follow-upit</button>
-    <button class="tab admin-only hidden" data-view="users">Käyttäjät</button>
-    <span class="tab-sep owner-only hidden">|</span>
-    <button class="tab owner-only hidden" data-view="owner-overview">Owner Overview</button>
-    <button class="tab owner-only hidden" data-view="owner-search">Company Search</button>
-    <button class="tab owner-only hidden" data-view="owner-decision-makers">Decision Makers</button>
-    <button class="tab owner-only hidden" data-view="owner-jobs">Open Jobs</button>
-    <button class="tab owner-only hidden" data-view="owner-signals">Opportunity Signals</button>
-    <button class="tab owner-only hidden" data-view="owner-saved-searches">Saved Searches</button>
-    <button class="tab owner-only hidden" data-view="owner-partners">Partner Performance</button>
-    <button class="tab owner-only hidden" data-view="owner-data-sources">Data Sources</button>
-    <button class="tab owner-only hidden" data-view="owner-audit">Audit Log</button>
-    <button class="tab owner-only hidden" data-view="owner-settings">Owner Settings</button>
-  </nav>
+  <div class="main-col">
+    <header class="topbar">
+      <button class="btn-ghost small mobile-nav-toggle" id="mobileNavToggle" aria-label="Avaa valikko" aria-expanded="false">☰</button>
+      <div class="whoami" style="margin-left:auto;">
+        <span id="whoName" class="who-name"></span>
+        <span id="whoRole" class="badge role-badge"></span>
+        <button id="logoutBtn" class="btn-ghost small">Kirjaudu ulos</button>
+      </div>
+    </header>
 
   <main id="views">
 
@@ -245,6 +240,8 @@
     </section>
 
   </main>
+  </div>
+</div>
 </div>
 
 <!-- Yrityksen detail-modal: koko historia yhdestä paikasta -->
@@ -261,6 +258,8 @@
     <div id="genericModalBody"></div>
   </div>
 </div>
+
+<div id="toastHost" aria-live="polite"></div>
 
 <script type="module" src="./app.js"></script>
 </body>
