@@ -62,6 +62,35 @@ create trigger trg_set_lead_protection before insert on companies
 --    kirjata" -mukavuus, ei tietoturvan perusta).
 -- ---------------------------------------------------------------
 
+-- Ennen uniikki-indeksien luontia: tuotannossa on jo ennestään duplikaatteja
+-- (esim. Medimatkat OY kahtena companies-rivinä), ja yllä oleva ALTER TABLE
+-- asetti JOKAISEN olemassa olevan rivin claim_status='active'. Ilman tätä
+-- siivousta seuraava CREATE UNIQUE INDEX epäonnistuisi heti olemassa olevaan
+-- ristiriitaan (23505 unique_violation). Emme poista mitään emmekä arvaa
+-- kumpi rivi on "oikea" - säilytämme aina vanhimman (created_at) rivin
+-- 'active'-tilassa (koskematta sen dataan) ja merkitsemme muut samaa
+-- business_id_norm/website_norm-arvoa jakavat rivit 'under_review'-tilaan,
+-- jolloin Owner näkee ne valmiiksi rakennetun "Yhdistä duplikaattiyritys
+-- tähän" -työkalun kautta eikä mitään historiaa tai dataa hävitetä
+-- ("Älä korjaa nykyisiä duplikaatteja poistamalla tietoja tai historiaa").
+with ranked as (
+  select id, business_id_norm,
+    row_number() over (partition by business_id_norm order by created_at) as rn
+  from companies
+  where claim_status = 'active' and business_id_norm is not null
+)
+update companies set claim_status = 'under_review'
+  from ranked where companies.id = ranked.id and ranked.rn > 1;
+
+with ranked as (
+  select id, website_norm,
+    row_number() over (partition by website_norm order by created_at) as rn
+  from companies
+  where claim_status = 'active' and website_norm is not null
+)
+update companies set claim_status = 'under_review'
+  from ranked where companies.id = ranked.id and ranked.rn > 1;
+
 create unique index companies_active_business_id_unique_idx
   on companies (business_id_norm) where claim_status = 'active' and business_id_norm is not null;
 create unique index companies_active_website_unique_idx
