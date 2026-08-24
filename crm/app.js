@@ -1094,6 +1094,26 @@ async function openNewOpportunityModal(preselectCompanyId) {
 // Vaiheen vaihdon lomakkeet (vain kevyt, vaiheen kannalta välttämätön tieto)
 // ---------------------------------------------------------------
 
+// "Voitettu"-lomakkeen tuoterivit — yksi kauppa (projekti) voi sisältää
+// useamman tuotteen, esim. AerWork + Kehitys samassa sopimuksessa. Jokainen
+// rivi vastaa yhtä deal_line_items-riviä (kesto/laskutusväli on yhteinen
+// koko sopimukselle, samoin kuin lomakkeen muissa kentissä).
+function addWonProductLine(container, opp, preselectOpportunityProduct) {
+  const row = document.createElement('div');
+  row.className = 'won-product-line';
+  row.innerHTML = `
+    <select class="wpl-product" required>
+      <option value="">Valitse tuote…</option>
+      ${productsCache.map((p) => `<option value="${p.id}" ${preselectOpportunityProduct && p.id === opp.product_id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+    </select>
+    <input type="number" class="wpl-price" placeholder="Kuukausihinta (€)" min="0" step="10" required />
+    <button type="button" class="btn-text small wpl-remove">Poista</button>`;
+  row.querySelector('.wpl-remove').addEventListener('click', () => {
+    if (container.children.length > 1) row.remove(); // aina jäätävä vähintään yksi rivi
+  });
+  container.appendChild(row);
+}
+
 function openStageTransitionModal(opp, targetStage) {
   const body = $('#genericModalBody');
   const company = opp.companies || {};
@@ -1122,14 +1142,14 @@ function openStageTransitionModal(opp, targetStage) {
       <h3>🎉 Siirto: Voitettu</h3>
       <p class="muted small">${escapeHtml(company.name)}</p>
       <form id="stageForm" class="form-grid">
-        <label>Lopullinen arvo (€) *<input required type="number" min="0" step="100" name="final_value" value="${opp.estimated_value ?? ''}" /></label>
-        <label>Kuukausihinta (MRR, €) *<input required type="number" min="0" step="10" name="monthly_price" /></label>
-        <label>Tuote *<select required name="product_id">${productsCache.map((p) => `<option value="${p.id}" ${p.id === opp.product_id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select></label>
+        <label class="full">Myydyt tuotteet * <span class="muted small">(projekti voi sisältää useamman tuotteen — lisää tarvittaessa rivejä)</span></label>
+        <div id="wonProductLines" class="full"></div>
+        <button type="button" class="btn-ghost small full" id="wonAddProductLine" style="width:fit-content;">+ Lisää tuote</button>
         <label>Sopimuksen alkamispäivä *<input required type="date" name="contract_start_date" value="${todayISO()}" /></label>
         <label>Kesto (kk) *<input required type="number" min="1" name="length_months" value="12" /></label>
         <label>Laskutusväli<select name="billing_interval"><option value="monthly">Kuukausittain</option><option value="quarterly">Neljännesvuosittain</option><option value="yearly">Vuosittain</option></select></label>
         <label>Käyttöönottovastuuhenkilö<select name="onboarding_owner_id">${orgProfilesCache.map((p) => `<option value="${p.id}" ${p.id === opp.responsible_user_id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select></label>
-        <p class="muted small full">Partnerikomissio lasketaan automaattisesti komissiosäännöistä sopimuksen tallennuksen yhteydessä.</p>
+        <p class="muted small full">Lopullinen arvo ja kuukausihinta (MRR) lasketaan automaattisesti tuoteriveiltä. Partnerikomissio lasketaan automaattisesti komissiosäännöistä sopimuksen tallennuksen yhteydessä.</p>
         <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Merkitse voitetuksi</button></div>
       </form>`,
     lost: () => `
@@ -1147,6 +1167,12 @@ function openStageTransitionModal(opp, targetStage) {
 
   body.innerHTML = forms[targetStage.key]();
   $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+
+  if (targetStage.key === 'won') {
+    const container = $('#wonProductLines', body);
+    addWonProductLine(container, opp, true); // ensimmäinen rivi valmiiksi, esitäytetty mahdollisuuden tuotteella
+    $('#wonAddProductLine', body).addEventListener('click', () => addWonProductLine(container, opp, false));
+  }
 
   $('#stageForm', body).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1179,6 +1205,12 @@ function openStageTransitionModal(opp, targetStage) {
           expected_close_date: v.valid_until || opp.expected_close_date
         });
       } else if (targetStage.key === 'won') {
+        const lineRows = $$('.won-product-line', e.target).map((row) => ({
+          product_id: row.querySelector('.wpl-product').value,
+          monthly_price: Number(row.querySelector('.wpl-price').value) || 0
+        })).filter((r) => r.product_id);
+        if (!lineRows.length) { alert('Lisää vähintään yksi tuote ennen tallennusta.'); submitBtn.disabled = false; return; }
+
         const start = v.contract_start_date;
         const end = new Date(start);
         end.setMonth(end.getMonth() + Number(v.length_months || 0));
@@ -1190,11 +1222,21 @@ function openStageTransitionModal(opp, targetStage) {
           status_id: signedStatus ? signedStatus.id : null, created_by: profile.id
         }).select().single();
         if (dealErr) throw dealErr;
-        await supabase.from('deal_line_items').insert({
-          deal_id: deal.id, product_id: v.product_id, quantity: 1, monthly_price: Number(v.monthly_price)
-        });
+
+        const { error: lineErr } = await supabase.from('deal_line_items').insert(
+          lineRows.map((r) => ({ deal_id: deal.id, product_id: r.product_id, quantity: 1, monthly_price: r.monthly_price }))
+        );
+        if (lineErr) throw lineErr;
+
+        // fn_recalc_deal_totals-trigger laski total_value/mrr jo tuoterivien
+        // lisäyksen yhteydessä palvelimella - haetaan lopullinen summa sieltä,
+        // ei lasketa (eikä kysytä) sitä enää erikseen käyttäjältä.
+        const { data: recalculatedDeal } = await supabase.from('deals').select('total_value, mrr').eq('id', deal.id).single();
+
         const ok = await moveOpportunityToStage(opp, targetStage, {
-          estimated_value: Number(v.final_value), product_id: v.product_id, won_deal_id: deal.id,
+          estimated_value: recalculatedDeal ? recalculatedDeal.total_value : null,
+          product_id: lineRows[0].product_id, // ensisijainen tuote listan kärjestä, mahdollisuudella yksi "pääsymbolinen" tuote
+          won_deal_id: deal.id,
           probability: targetStage.default_probability // voitto pakottaa aina 100%, ohittaa käsin-muutetun lipun
         });
         if (!ok) return;

@@ -370,6 +370,11 @@ h3{color:var(--navy-700); font-size:var(--text-md);}
 .checkbox-inline{display:flex; align-items:center; gap:6px; font-weight:500;}
 .checkbox-inline input{width:auto;}
 
+/* ---- "Voitettu"-lomakkeen tuoterivit (projekti = useampi tuote) ---- */
+.won-product-line{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
+.won-product-line .wpl-product{flex:2;}
+.won-product-line .wpl-price{flex:1; min-width:0;}
+
 /* ---- Follow-ups ---- */
 .followup-cols{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px;}
 .fu-col-title{padding:6px 0; border-bottom:2px solid var(--border);}
