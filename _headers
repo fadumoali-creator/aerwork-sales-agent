@@ -1,0 +1,9 @@
+# Estää selaimia/CDN:ää cachettamasta CRM:n staattisia tiedostoja liian
+# pitkäksi aikaa - projektissa ei ole build-vaihetta eikä sisällön hash-
+# pohjaista tiedostonimeä, joten ilman tätä käyttäjä saattaa nähdä vanhan
+# JS/CSS-version pitkäänkin uuden deployn jälkeen (havaittu käytännössä:
+# vanha "Voitettu"-lomake näkyi vielä uuden deployn jälkeen).
+# no-cache = selain TARKISTAA aina palvelimelta onko sisältö muuttunut
+# (ETag/Last-Modified) ennen kuin käyttää välimuistissa olevaa kopiota.
+/crm/*
+  Cache-Control: no-cache, must-revalidate
