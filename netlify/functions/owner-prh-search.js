@@ -60,10 +60,15 @@ exports.handler = async (event) => {
     return json(403, { error: 'Vain hyväksytty AerWork Owner Super Admin voi käyttää tätä hakua.' });
   }
 
-  // businessId-haulla PRH:n oma "location" ei ole relevantti (Y-tunnus on
-  // jo yksikäsitteinen) - siinä tapauksessa location(t) jätetään pois eikä
-  // tehdä useaa turhaa kutsua.
-  const searchLocations = business_id ? [] : locations;
+  // Tuotannossa havaittiin: PRH:n "location" ei suodata luotettavasti
+  // yhdistettynä name/businessId-hakuun (yhdistetty haku palautti joko
+  // vääriä kaupunkeja tai nollasi tulokset kokonaan). Siksi location(t)
+  // lähetetään PRH:lle VAIN kun haetaan pelkällä kaupungilla, ilman
+  // nimeä/Y-tunnusta. Jos nimi/Y-tunnus on annettu, haetaan sillä
+  // normaalisti ja kaupunki suodatetaan luotettavasti client-puolella
+  // (ks. crm/app.js: addressMatchesAnyCity) - PRH:n palauttama osoitedata
+  // on tarkkaa, vain sen oma location-hakuparametri ei ole.
+  const searchLocations = (business_id || name) ? [] : locations;
   const baseParams = () => {
     const p = new URLSearchParams();
     if (business_id) p.set('businessId', String(business_id));
