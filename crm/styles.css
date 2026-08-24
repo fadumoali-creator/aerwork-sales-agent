@@ -242,6 +242,28 @@ textarea:focus-visible, [tabindex]:focus-visible{
   .mobile-nav-scrim.visible{display:block;}
 }
 
+/* ---- Owner: Company Search sivun yläosa ---- */
+.search-page-head{margin-bottom:var(--space-4);}
+.search-page-head h2{margin-bottom:2px;}
+.search-bar-row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:var(--space-3);}
+.search-input-wrap{position:relative; flex:1; min-width:260px;}
+.search-input-icon{position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:13px; opacity:.6;}
+.search-input-wrap input{width:100%; padding:9px 12px 9px 34px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:var(--text-base);}
+.search-meta-row{display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; margin-bottom:var(--space-3); min-height:32px;}
+.chip-row{display:flex; gap:6px; flex-wrap:wrap;}
+.filter-chip{
+  display:inline-flex; align-items:center; gap:6px; background:var(--teal-100); color:var(--teal-600);
+  border-radius:var(--radius-pill); padding:4px 6px 4px 10px; font-size:var(--text-xs); font-weight:600;
+}
+.filter-chip button{background:none; border:none; color:inherit; font-size:13px; line-height:1; padding:2px;}
+.view-toggle{margin-left:auto; display:flex; border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden;}
+.view-toggle-btn{background:var(--panel); border:none; padding:6px 12px; font-size:var(--text-xs); font-weight:600; color:var(--neutral-500);}
+.view-toggle-btn.active{background:var(--navy-700); color:#fff;}
+.drawer-filter-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; margin-top:var(--space-4);}
+.drawer-filter-grid label{display:flex; flex-direction:column; gap:4px; font-size:var(--text-sm); font-weight:600; color:var(--navy-700);}
+.drawer-filter-grid input, .drawer-filter-grid select{padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);}
+@media (max-width:600px){ .drawer-filter-grid{grid-template-columns:1fr;} }
+
 /* ---- Owner: Company Search kortin osiot ---- */
 .search-card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-md); padding:14px 16px; margin-bottom:10px; box-shadow:var(--shadow-card);}
 .search-card-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-top:10px;}

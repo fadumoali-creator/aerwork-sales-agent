@@ -249,7 +249,18 @@ async function switchView(view) {
   if (view === 'followups') await loadFollowups();
   if (view === 'users') await loadUsers();
   if (view === 'owner-overview') await loadOwnerOverview();
-  if (view === 'owner-search') { /* haku käynnistyy vasta napista, ei automaattisesti */ }
+  if (view === 'owner-search') {
+    // Hakutila (haku, suodattimet, tulokset) säilyy - haku EI käynnisty automaattisesti
+    // uudestaan, koska lastOwnerSearchResults on jo muistissa aiemmasta hausta.
+    $$('.view-toggle-btn', $('#ownerSearchViewToggle')).forEach((b) => {
+      b.classList.toggle('active', b.dataset.mode === ownerSearchViewMode);
+      b.setAttribute('aria-pressed', String(b.dataset.mode === ownerSearchViewMode));
+    });
+    if (lastOwnerSearchResults.length) {
+      $('#ownerSearchMetaRow').classList.remove('hidden');
+      renderOwnerSearchResults();
+    }
+  }
   if (view === 'owner-decision-makers') await loadOwnerDecisionMakers();
   if (view === 'owner-jobs') await loadOwnerJobs();
   if (view === 'owner-signals') await loadOwnerSignals();
@@ -272,6 +283,7 @@ function wireModals() {
   $('#exportCsvBtn').addEventListener('click', exportCompaniesCsv);
   $('#inviteUserBtn').addEventListener('click', openInviteUserModal);
   $('#ownerSearchBtn').addEventListener('click', runOwnerCompanySearch);
+  $('#ownerSearchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runOwnerCompanySearch(); });
   $('#ownerAuditRefreshBtn').addEventListener('click', loadOwnerAuditLog);
   $('#ownerAuditTableFilter').addEventListener('change', loadOwnerAuditLog);
   $('#ownerDmRefreshBtn').addEventListener('click', loadOwnerDecisionMakers);
@@ -279,9 +291,63 @@ function wireModals() {
   $('#ownerJobRefreshBtn').addEventListener('click', loadOwnerJobs);
   $('#ownerJobStatusFilter').addEventListener('change', loadOwnerJobs);
   $('#ownerNewSavedSearchBtn').addEventListener('click', openSaveSearchModal);
-  $('#ownerSearchCrmFilter').addEventListener('change', renderOwnerSearchResults);
-  $('#ownerSearchDmFilter').addEventListener('change', renderOwnerSearchResults);
-  $('#ownerSearchSort').addEventListener('change', renderOwnerSearchResults);
+  $('#ownerSavedSearchesBtn').addEventListener('click', () => switchView('owner-saved-searches'));
+  wireOwnerSearchChrome();
+}
+
+// ---------------------------------------------------------------
+// Company Search — hakupalkin/suodattimien/näkymän vaihdon "kromi"
+// ---------------------------------------------------------------
+
+let ownerSearchViewMode = localStorage.getItem('aerwork_search_view_mode') || 'cards';
+let ownerSearchFilters = { city: '', industry: '', crm: '', dm: '', sort: 'default' };
+
+function wireOwnerSearchChrome() {
+  $('#ownerAdvancedFiltersBtn').addEventListener('click', openFiltersDrawer);
+  $('#ownerFiltersDrawerClose').addEventListener('click', closeFiltersDrawer);
+  $('#ownerFiltersDrawerOverlay').addEventListener('click', closeFiltersDrawer);
+  $('#ownerFiltersDrawerApply').addEventListener('click', () => {
+    ownerSearchFilters = {
+      city: $('#fCity').value.trim(), industry: $('#fIndustry').value.trim(),
+      crm: $('#fCrm').value, dm: $('#fDm').value, sort: $('#fSort').value
+    };
+    closeFiltersDrawer();
+    renderOwnerSearchResults();
+  });
+  $('#ownerClearFiltersBtn').addEventListener('click', () => {
+    ownerSearchFilters = { city: '', industry: '', crm: '', dm: '', sort: 'default' };
+    $('#fCity').value = ''; $('#fIndustry').value = ''; $('#fCrm').value = ''; $('#fDm').value = ''; $('#fSort').value = 'default';
+    renderOwnerSearchResults();
+  });
+  $$('.view-toggle-btn', $('#ownerSearchViewToggle')).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ownerSearchViewMode = btn.dataset.mode;
+      localStorage.setItem('aerwork_search_view_mode', ownerSearchViewMode);
+      $$('.view-toggle-btn', $('#ownerSearchViewToggle')).forEach((b) => {
+        b.classList.toggle('active', b === btn);
+        b.setAttribute('aria-pressed', String(b === btn));
+      });
+      renderOwnerSearchResults();
+    });
+  });
+}
+
+function openFiltersDrawer() {
+  $('#ownerFiltersDrawer').classList.remove('hidden');
+  $('#ownerFiltersDrawerOverlay').classList.remove('hidden');
+}
+function closeFiltersDrawer() {
+  $('#ownerFiltersDrawer').classList.add('hidden');
+  $('#ownerFiltersDrawerOverlay').classList.add('hidden');
+}
+
+function activeFilterChips() {
+  const chips = [];
+  if (ownerSearchFilters.city) chips.push({ key: 'city', label: `Kaupunki: ${ownerSearchFilters.city}` });
+  if (ownerSearchFilters.industry) chips.push({ key: 'industry', label: `Toimiala: ${ownerSearchFilters.industry}` });
+  if (ownerSearchFilters.crm) chips.push({ key: 'crm', label: ownerSearchFilters.crm === 'in_crm' ? 'Jo CRM:ssä' : 'Ei CRM:ssä' });
+  if (ownerSearchFilters.dm) chips.push({ key: 'dm', label: ownerSearchFilters.dm === 'found' ? 'Päättäjä löydetty' : 'Päättäjää ei löydetty' });
+  return chips;
 }
 
 function fillStatusFilter() {
@@ -896,133 +962,205 @@ async function loadOwnerOverview() {
 let lastOwnerSearchResults = [];
 let lastOwnerSearchMeta = null;
 
-async function runOwnerCompanySearch() {
-  const name = $('#ownerSearchName').value.trim();
-  const businessId = $('#ownerSearchBusinessId').value.trim();
-  const resultsEl = $('#ownerSearchResults');
-  $('#ownerSearchRefineBar').style.display = 'none';
+const BUSINESS_ID_PATTERN = /^\d{6,7}-\d$/;
 
-  if (!name && !businessId) {
-    resultsEl.innerHTML = '<p class="muted">Anna yrityksen nimi tai Y-tunnus.</p>';
+async function runOwnerCompanySearch() {
+  const input = $('#ownerSearchInput').value.trim();
+  const resultsEl = $('#ownerSearchResults');
+  $('#ownerSearchMetaRow').classList.add('hidden');
+
+  if (!input) {
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Anna hakusana</div>Hae yrityksen nimellä tai Y-tunnuksella (esim. 1234567-8).</div>';
     return;
   }
-  resultsEl.innerHTML = '<p class="muted">Haetaan PRH/YTJ:stä…</p>';
+  const isBusinessId = BUSINESS_ID_PATTERN.test(input);
+
+  // Skeleton-lataustila - ei tyhjä sivu haun ajan.
+  resultsEl.innerHTML = Array.from({ length: 4 }, () => `
+    <div class="search-card"><div class="skeleton skeleton-line short"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-card"></div></div>`).join('');
 
   let resp, result;
   try {
     resp = await fetch('/.netlify/functions/owner-prh-search', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify({ name: name || undefined, business_id: businessId || undefined })
+      body: JSON.stringify(isBusinessId ? { business_id: input } : { name: input })
     });
     result = await resp.json();
   } catch (err) {
-    resultsEl.innerHTML = `<p class="error-text">Haku epäonnistui: ${err.message}</p>`;
+    resultsEl.innerHTML = `<div class="empty-state"><div class="es-title">Haku epäonnistui</div>${escapeHtml(err.message)}. Tarkista verkkoyhteys ja yritä uudestaan. Ei vaikuta muuhun CRM-dataan.</div>`;
     return;
   }
   if (!resp.ok) {
-    resultsEl.innerHTML = `<p class="error-text">${escapeHtml(result.error || 'Haku epäonnistui.')}</p>`;
+    resultsEl.innerHTML = `<div class="empty-state"><div class="es-title">Haku epäonnistui</div>${escapeHtml(result.error || 'Tuntematon virhe.')} Ei vaikuta muuhun CRM-dataan - kokeile hetken päästä uudestaan.</div>`;
     return;
   }
   if (!result.results.length) {
-    resultsEl.innerHTML = '<p class="muted">Ei tuloksia. Tarkista kirjoitusasu tai kokeile Y-tunnuksella.</p>';
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei tuloksia</div>Tarkista kirjoitusasu tai kokeile Y-tunnuksella (muoto 1234567-8).</div>';
     return;
   }
 
   lastOwnerSearchResults = result.results;
   lastOwnerSearchMeta = result;
-  $('#ownerSearchRefineBar').style.display = '';
+  $('#ownerSearchMetaRow').classList.remove('hidden');
   renderOwnerSearchResults();
+}
+
+function filteredSortedOwnerSearchResults() {
+  const f = ownerSearchFilters;
+  let rows = lastOwnerSearchResults.filter((r) => {
+    const address = (r.addresses || [])[0] || {};
+    const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : '';
+    if (f.city && !(city || '').toLowerCase().includes(f.city.toLowerCase())) return false;
+    if (f.industry && !(r.main_business_line || '').toLowerCase().includes(f.industry.toLowerCase())) return false;
+    if (f.crm === 'in_crm' && !r.in_crm) return false;
+    if (f.crm === 'not_in_crm' && r.in_crm) return false;
+    if (f.dm === 'found' && !r.decision_maker) return false;
+    if (f.dm === 'not_found' && r.decision_maker) return false;
+    return true;
+  });
+  if (f.sort === 'dm_first') rows = [...rows].sort((a, b) => (b.decision_maker ? 1 : 0) - (a.decision_maker ? 1 : 0));
+  else if (f.sort === 'newest_registration') rows = [...rows].sort((a, b) => new Date(b.registration_date || 0) - new Date(a.registration_date || 0));
+  return rows;
 }
 
 function renderOwnerSearchResults() {
   const resultsEl = $('#ownerSearchResults');
   if (!lastOwnerSearchResults.length) return;
 
-  const crmFilter = $('#ownerSearchCrmFilter').value;
-  const dmFilter = $('#ownerSearchDmFilter').value;
-  const sort = $('#ownerSearchSort').value;
+  const rows = filteredSortedOwnerSearchResults();
 
-  let rows = lastOwnerSearchResults.filter((r) => {
-    if (crmFilter === 'in_crm' && !r.in_crm) return false;
-    if (crmFilter === 'not_in_crm' && r.in_crm) return false;
-    if (dmFilter === 'found' && !r.decision_maker) return false;
-    if (dmFilter === 'not_found' && r.decision_maker) return false;
-    return true;
+  $('#ownerSearchResultCount').textContent = `${rows.length} tulos${rows.length === 1 ? '' : 'ta'}`;
+  const chips = activeFilterChips();
+  $('#ownerSearchChips').innerHTML = chips.map((c) => `
+    <span class="filter-chip">${escapeHtml(c.label)}<button type="button" data-chip-remove="${c.key}" aria-label="Poista suodatin">×</button></span>`).join('');
+  $('#ownerClearFiltersBtn').classList.toggle('hidden', chips.length === 0);
+  $$('[data-chip-remove]', $('#ownerSearchChips')).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ownerSearchFilters[btn.dataset.chipRemove] = '';
+      renderOwnerSearchResults();
+    });
   });
 
-  if (sort === 'dm_first') {
-    rows = [...rows].sort((a, b) => (b.decision_maker ? 1 : 0) - (a.decision_maker ? 1 : 0));
-  } else if (sort === 'newest_registration') {
-    rows = [...rows].sort((a, b) => new Date(b.registration_date || 0) - new Date(a.registration_date || 0));
-  }
-
   if (!rows.length) {
-    resultsEl.innerHTML = '<p class="muted">Ei tuloksia näillä suodattimilla.</p>';
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei tuloksia näillä suodattimilla</div>Kokeile tyhjentää suodattimet.</div>';
     return;
   }
 
-  resultsEl.innerHTML = rows.map((r) => searchCardHtml(r)).join('');
-  wireSearchCardActions(resultsEl);
+  resultsEl.innerHTML = ownerSearchViewMode === 'table' ? searchTableHtml(rows) : rows.map((r) => searchCardHtml(r)).join('');
+  wireSearchResultActions(resultsEl);
+}
+
+function growthIndicatorHtml() {
+  // Ei koskaan keksitä lukua - kasvun suunta näytetään aina "Ei tietoa" kunnes
+  // oikea taloustietolähde on liitetty (ks. data_sources: financial_data).
+  return `<span class="growth-indicator growth-unknown"><span class="gi-icon">–</span>Ei tietoa</span>`;
+}
+
+function decisionMakerBlockHtml(dm) {
+  if (!dm) return '<div class="muted">Päättäjää ei ole vielä löydetty</div>';
+  const statusLabel = dm.review_status === 'approved' ? 'Hyväksytty' : dm.review_status === 'rejected' ? 'Hylätty' : 'Vahvistamaton';
+  return `
+    <div><strong>${escapeHtml(dm.name)}</strong>${dm.title ? `, ${escapeHtml(dm.title)}` : ''}</div>
+    <div class="muted small">
+      <span class="source-tag ${dm.confidence === 'ai_paattely' ? 'ai-analysis' : ''}">${dm.confidence === 'ai_paattely' ? 'AI-analyysi' : statusLabel}</span>
+      ${dm.source_url ? ` · <a href="${escapeHtml(dm.source_url)}" target="_blank" rel="noopener">Lähde ↗</a>` : ''}
+    </div>
+    <div class="muted small">tarkistettu ${fmtDate(dm.found_at)}</div>`;
 }
 
 function searchCardHtml(r) {
   const idx = lastOwnerSearchResults.indexOf(r);
   const address = (r.addresses || [])[0] || {};
   const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : null;
-  const dm = r.decision_maker;
 
   return `
     <div class="search-card" data-idx="${idx}">
-      <div class="cc-name">${escapeHtml(r.name || '(nimi tuntematon)')} ${r.in_crm ? '<span class="status-pill won">Jo CRM:ssä</span>' : ''}</div>
+      <div class="cc-name">${escapeHtml(r.name || '(nimi tuntematon)')} ${r.in_crm ? '<span class="status-pill won">Jo CRM:ssä</span>' : '<span class="status-pill neutral">Ei CRM:ssä</span>'}</div>
       <div class="search-card-grid">
         <div class="search-card-section">
-          <h5>Yrityksen perustiedot</h5>
+          <h5>Yritys</h5>
           <div>Y-tunnus: ${escapeHtml(r.business_id || '—')}</div>
-          <div>${escapeHtml(r.company_form || '—')}</div>
-          <div>Rekisteröity: ${fmtDate(r.registration_date)}</div>
-          <div>${escapeHtml(city || 'Kaupunki tuntematon')}</div>
+          <div>${escapeHtml(r.company_form || '—')} · ${escapeHtml(city || 'Kaupunki tuntematon')}</div>
           <div>${escapeHtml(r.main_business_line || 'Toimiala tuntematon')}</div>
-          <div class="muted small" style="margin-top:6px;">Lähde: virallinen rekisteri (PRH/YTJ)<br/>Tarkistettu: ${fmtDateTime(lastOwnerSearchMeta.fetched_at)}</div>
+          <div class="source-tag official" style="margin-top:6px;">PRH/YTJ · tarkistettu ${fmtDate(lastOwnerSearchMeta.fetched_at)}</div>
         </div>
         <div class="search-card-section">
           <h5>Talous ja kasvu</h5>
           <div>Liikevaihto: <span class="muted">Ei saatavilla</span></div>
-          <div>Kasvun suunta: <span class="growth-unknown">Ei tietoa</span></div>
-          <div>Henkilöstömäärä: <span class="muted">Ei saatavilla</span></div>
-          <div class="muted small" style="margin-top:6px;">🔒 Vaatii maksullisen taloustietolähteen (ei vielä käytössä) - ei arvattu.</div>
+          <div>${growthIndicatorHtml()}</div>
+          <div class="muted small" style="margin-top:6px;">🔒 Vaatii maksullisen taloustietolähteen</div>
         </div>
         <div class="search-card-section">
           <h5>Päättäjä</h5>
-          ${dm ? `
-            <div><strong>${escapeHtml(dm.name)}</strong>${dm.title ? `, ${escapeHtml(dm.title)}` : ''}</div>
-            <div class="muted small">
-              ${dm.source_url ? `<a href="${escapeHtml(dm.source_url)}" target="_blank" rel="noopener">Lähde ↗</a> · ` : ''}
-              ${dm.review_status === 'approved' ? 'Hyväksytty' : dm.review_status === 'rejected' ? 'Hylätty' : 'Vahvistamaton'}
-            </div>
-            <div class="muted small">Lähde: ${escapeHtml(dm.source)} (${dm.confidence}) · tarkistettu ${fmtDate(dm.found_at)}</div>
-          ` : '<div class="muted">Päättäjää ei ole vielä löydetty</div>'}
+          ${decisionMakerBlockHtml(r.decision_maker)}
         </div>
       </div>
       <div class="search-card-actions">
         ${r.in_crm
           ? `<button class="btn-primary small" data-action="open-crm" data-idx="${idx}">Avaa CRM:ssä</button>`
           : `<button class="btn-primary small" data-action="add-to-crm" data-idx="${idx}">Lisää CRM:ään</button>`}
-        <button class="btn-ghost small" data-action="find-dm" data-idx="${idx}">${r.in_crm ? 'Etsi päättäjä' : 'Lisää CRM:ään ja etsi päättäjä'}</button>
+        <div class="dropdown">
+          <button class="btn-ghost small" data-action="toggle-more" data-idx="${idx}">⋯ Lisää</button>
+          <div class="dropdown-menu hidden" data-more-menu="${idx}">
+            ${r.in_crm ? `<button data-action="open-company" data-idx="${idx}">Näytä yritys</button>` : ''}
+            <button data-action="find-dm" data-idx="${idx}">${r.in_crm ? 'Etsi päättäjä' : 'Lisää CRM:ään ja etsi päättäjä'}</button>
+            ${r.business_id ? `<button data-action="open-source" data-idx="${idx}">Avaa lähde (PRH-data)</button>` : ''}
+          </div>
+        </div>
       </div>
     </div>`;
 }
 
-function wireSearchCardActions(resultsEl) {
+function searchTableHtml(rows) {
+  return `
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Yritys</th><th>Y-tunnus</th><th>Kaupunki</th><th>Toimiala</th><th>CRM</th><th>Päättäjä</th><th></th></tr></thead>
+      <tbody>${rows.map((r) => {
+        const idx = lastOwnerSearchResults.indexOf(r);
+        const address = (r.addresses || [])[0] || {};
+        const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : '—';
+        return `<tr>
+          <td>${escapeHtml(r.name || '—')}</td>
+          <td>${escapeHtml(r.business_id || '—')}</td>
+          <td>${escapeHtml(city)}</td>
+          <td>${escapeHtml(r.main_business_line || '—')}</td>
+          <td>${r.in_crm ? '<span class="status-pill won">Jo CRM:ssä</span>' : '<span class="status-pill neutral">Ei CRM:ssä</span>'}</td>
+          <td>${r.decision_maker ? escapeHtml(r.decision_maker.name) : '<span class="muted">Ei löydetty</span>'}</td>
+          <td>${r.in_crm
+            ? `<button class="btn-ghost small" data-action="open-crm" data-idx="${idx}">Avaa</button>`
+            : `<button class="btn-primary small" data-action="add-to-crm" data-idx="${idx}">Lisää CRM:ään</button>`}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    </div>`;
+}
+
+function wireSearchResultActions(resultsEl) {
   $$('[data-action="add-to-crm"]', resultsEl).forEach((btn) => {
     btn.addEventListener('click', () => addExternalResultToCrm(lastOwnerSearchResults[Number(btn.dataset.idx)]));
   });
-  $$('[data-action="open-crm"]', resultsEl).forEach((btn) => {
+  $$('[data-action="open-crm"], [data-action="open-company"]', resultsEl).forEach((btn) => {
     btn.addEventListener('click', () => openCompanyModal(lastOwnerSearchResults[Number(btn.dataset.idx)].existing_company_id));
   });
   $$('[data-action="find-dm"]', resultsEl).forEach((btn) => {
     btn.addEventListener('click', () => findDecisionMakerForSearchResult(Number(btn.dataset.idx), btn));
   });
+  $$('[data-action="open-source"]', resultsEl).forEach((btn) => {
+    const r = lastOwnerSearchResults[Number(btn.dataset.idx)];
+    btn.addEventListener('click', () => window.open(`https://avoindata.prh.fi/opendata-ytj-api/v3/companies?businessId=${encodeURIComponent(r.business_id)}`, '_blank', 'noopener'));
+  });
+  $$('[data-action="toggle-more"]', resultsEl).forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = resultsEl.querySelector(`[data-more-menu="${btn.dataset.idx}"]`);
+      const wasHidden = menu.classList.contains('hidden');
+      $$('.dropdown-menu', resultsEl).forEach((m) => m.classList.add('hidden'));
+      if (wasHidden) menu.classList.remove('hidden');
+    });
+  });
+  document.addEventListener('click', () => $$('.dropdown-menu', resultsEl).forEach((m) => m.classList.add('hidden')), { once: true });
 }
 
 async function findDecisionMakerForSearchResult(idx, btn) {
@@ -1476,8 +1614,7 @@ async function loadOwnerSavedSearches() {
 
 function openSaveSearchModal() {
   const body = $('#genericModalBody');
-  const currentName = $('#ownerSearchName')?.value.trim() || '';
-  const currentBusinessId = $('#ownerSearchBusinessId')?.value.trim() || '';
+  const currentInput = $('#ownerSearchInput')?.value.trim() || '';
 
   body.innerHTML = `
     <h3>Tallenna haku</h3>
@@ -1486,7 +1623,7 @@ function openSaveSearchModal() {
       <label class="full">Haun nimi *<input required name="name" placeholder="esim. Suomalaiset kotihoitoyritykset" /></label>
       <label class="full">Kuvaus<textarea name="description" rows="2"></textarea></label>
       <label class="full">Nykyiset hakuehdot (muokattavissa JSON:na)
-        <textarea name="filters" rows="2">${escapeHtml(JSON.stringify({ name: currentName, business_id: currentBusinessId }))}</textarea>
+        <textarea name="filters" rows="2">${escapeHtml(JSON.stringify({ query: currentInput, ...ownerSearchFilters }))}</textarea>
       </label>
       <div class="form-actions full">
         <button type="button" class="btn-ghost" data-close-modal>Peruuta</button>
