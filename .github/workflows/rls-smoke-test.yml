@@ -13,6 +13,10 @@ name: RLS-eristystesti (Supabase)
 #   TEST_PARTNER_A_PASSWORD
 #   TEST_PARTNER_B_EMAIL
 #   TEST_PARTNER_B_PASSWORD
+#
+# Valinnaiset (Owner Super Admin -kolmoisportin testiin, ks. tests/owner-rls-smoke-test.js):
+#   TEST_OWNER_EMAIL / TEST_OWNER_PASSWORD (rooli owner_super_admin + allowlistillä)
+#   TEST_FAKE_OWNER_EMAIL / TEST_FAKE_OWNER_PASSWORD (rooli owner_super_admin, EI allowlistillä)
 
 on:
   workflow_dispatch: {}
@@ -40,5 +44,17 @@ jobs:
           TEST_PARTNER_B_PASSWORD: ${{ secrets.TEST_PARTNER_B_PASSWORD }}
         run: node tests/rls-smoke-test.js
 
-      - name: Aja laskentayksikkötestit (MRR/ARR/komissio)
+      - name: Aja Owner Super Admin -murtotesti
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TEST_PARTNER_A_EMAIL: ${{ secrets.TEST_PARTNER_A_EMAIL }}
+          TEST_PARTNER_A_PASSWORD: ${{ secrets.TEST_PARTNER_A_PASSWORD }}
+          TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_FAKE_OWNER_EMAIL: ${{ secrets.TEST_FAKE_OWNER_EMAIL }}
+          TEST_FAKE_OWNER_PASSWORD: ${{ secrets.TEST_FAKE_OWNER_PASSWORD }}
+        run: node tests/owner-rls-smoke-test.js
+
+      - name: Aja laskentayksikkötestit (MRR/ARR/komissio/Opportunity Score)
         run: npm test

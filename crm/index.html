@@ -46,6 +46,10 @@
     <button class="tab" data-view="pipeline">Myyntiputki</button>
     <button class="tab" data-view="followups">Follow-upit</button>
     <button class="tab admin-only hidden" data-view="users">Käyttäjät</button>
+    <span class="tab-sep owner-only hidden">|</span>
+    <button class="tab owner-only hidden" data-view="owner-overview">Owner Overview</button>
+    <button class="tab owner-only hidden" data-view="owner-search">Company Search</button>
+    <button class="tab owner-only hidden" data-view="owner-audit">Audit Log</button>
   </nav>
 
   <main id="views">
@@ -102,6 +106,49 @@
         <button class="btn-primary" id="inviteUserBtn">+ Kutsu käyttäjä</button>
       </div>
       <div id="userList" class="table-scroll"></div>
+    </section>
+
+    <!-- ===================== OWNER SUPER ADMIN -NÄKYMÄT ===================== -->
+    <!-- Nämä näkyvät VAIN jos profile.role==='owner_super_admin' JA palvelin
+         vahvistaa is_owner_super_admin()=true. RLS estää datan näkymisen
+         kaikilta muilta vaikka joku manipuloisi tätä näkymää selaimessa. -->
+
+    <section id="view-owner-overview" class="view">
+      <h2>Owner Overview</h2>
+      <p class="muted small">Henkilökohtainen johtamisnäkymä — vain AerWork Owner Super Admin.</p>
+      <div class="kpi-grid" id="ownerKpiGrid"></div>
+      <div id="ownerPartnerActivityWrap">
+        <h3>Certified Partnerien aktiivisuus</h3>
+        <div id="ownerPartnerActivity" class="table-scroll"></div>
+      </div>
+    </section>
+
+    <section id="view-owner-search" class="view">
+      <h2>Company Search</h2>
+      <p class="muted small">Hae suomalaisia yrityksiä PRH/YTJ-rekisteristä. Tulokset merkitään aina lähteellä ja tarkistuspäivällä.</p>
+      <div class="filters">
+        <input type="search" id="ownerSearchName" placeholder="Yrityksen nimi…" />
+        <input type="text" id="ownerSearchBusinessId" placeholder="Y-tunnus (valinnainen)…" />
+        <button class="btn-primary" id="ownerSearchBtn">Hae PRH/YTJ:stä</button>
+      </div>
+      <div id="ownerSearchResults" class="company-list"></div>
+    </section>
+
+    <section id="view-owner-audit" class="view">
+      <h2>Audit Log</h2>
+      <p class="muted small">Muuttumaton tapahtumaloki. Vain Owner Super Admin näkee koko historian kaikista partnereista.</p>
+      <div class="filters">
+        <select id="ownerAuditTableFilter">
+          <option value="">Kaikki taulut</option>
+          <option value="companies">companies</option>
+          <option value="deals">deals</option>
+          <option value="activities">activities</option>
+          <option value="followup_tasks">followup_tasks</option>
+          <option value="external_company_records">external_company_records</option>
+        </select>
+        <button class="btn-ghost small" id="ownerAuditRefreshBtn">Päivitä</button>
+      </div>
+      <div id="ownerAuditLog" class="table-scroll"></div>
     </section>
 
   </main>
