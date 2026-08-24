@@ -28,8 +28,17 @@ exports.handler = async (event) => {
   }
 
   const { name, business_id } = payload;
-  if (!name && !business_id) {
-    return json(400, { error: 'name tai business_id vaaditaan.' });
+  // PRH/YTJ v3 tukee hakua kaupungin/paikkakunnan mukaan omalla
+  // "location"-parametrillaan (ei nimihakua) - tämä mahdollistaa oikean
+  // "etsi yritykset tietystä kaupungista" -haun eikä vain nimihaun
+  // jälkikäteissuodatusta. locations voi sisältää useamman kaupungin
+  // (OR-haku: jokaiselle tehdään oma PRH-kutsu ja tulokset yhdistetään).
+  const locations = Array.isArray(payload.locations)
+    ? payload.locations.map((l) => String(l || '').trim()).filter(Boolean)
+    : (payload.location ? [String(payload.location).trim()].filter(Boolean) : []);
+
+  if (!name && !business_id && !locations.length) {
+    return json(400, { error: 'name, business_id tai kaupunki (location) vaaditaan.' });
   }
 
   let caller;
@@ -51,23 +60,49 @@ exports.handler = async (event) => {
     return json(403, { error: 'Vain hyväksytty AerWork Owner Super Admin voi käyttää tätä hakua.' });
   }
 
-  const params = new URLSearchParams();
-  if (business_id) params.set('businessId', String(business_id));
-  else params.set('name', String(name));
-  params.set('maxResults', '10');
+  // businessId-haulla PRH:n oma "location" ei ole relevantti (Y-tunnus on
+  // jo yksikäsitteinen) - siinä tapauksessa location(t) jätetään pois eikä
+  // tehdä useaa turhaa kutsua.
+  const searchLocations = business_id ? [] : locations;
+  const baseParams = () => {
+    const p = new URLSearchParams();
+    if (business_id) p.set('businessId', String(business_id));
+    if (name) p.set('name', String(name));
+    p.set('maxResults', String(searchLocations.length > 1 ? 15 : 20));
+    return p;
+  };
 
   let results = [];
   let succeeded = true;
   let errorMessage = null;
 
   try {
-    const resp = await fetch(`https://avoindata.prh.fi/opendata-ytj-api/v3/companies?${params.toString()}`, {
-      headers: { Accept: 'application/json' }
-    });
-    if (!resp.ok) {
-      succeeded = false;
-      errorMessage = `PRH-haku epäonnistui (HTTP ${resp.status}).`;
+    if (searchLocations.length) {
+      // Yksi PRH-kutsu per kaupunki (OR-haku), tulokset yhdistetään ja
+      // duplikaatit poistetaan Y-tunnuksen perusteella.
+      const perLocation = await Promise.all(searchLocations.map(async (loc) => {
+        const p = baseParams();
+        p.set('location', loc);
+        const resp = await fetch(`https://avoindata.prh.fi/opendata-ytj-api/v3/companies?${p.toString()}`, {
+          headers: { Accept: 'application/json' }
+        });
+        if (!resp.ok) throw new Error(`PRH-haku epäonnistui kaupungille "${loc}" (HTTP ${resp.status}).`);
+        const data = await resp.json();
+        return Array.isArray(data.companies) ? data.companies : [];
+      }));
+      const seen = new Set();
+      results = perLocation.flat().filter((c) => {
+        const bid = c.businessId ? c.businessId.value : null;
+        const key = bid || JSON.stringify(c);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     } else {
+      const resp = await fetch(`https://avoindata.prh.fi/opendata-ytj-api/v3/companies?${baseParams().toString()}`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!resp.ok) throw new Error(`PRH-haku epäonnistui (HTTP ${resp.status}).`);
       const data = await resp.json();
       results = Array.isArray(data.companies) ? data.companies : [];
     }
@@ -76,11 +111,16 @@ exports.handler = async (event) => {
     errorMessage = String((err && err.message) || err);
   }
 
+  const requestSummaryParts = [];
+  if (name) requestSummaryParts.push(`name=${name}`);
+  if (business_id) requestSummaryParts.push(`business_id=${business_id}`);
+  if (searchLocations.length) requestSummaryParts.push(`location=${searchLocations.join('|')}`);
+
   await admin.from('integration_usage_log').insert({
     data_source_key: 'prh_ytj',
     action: 'search',
     requested_by: caller.id,
-    request_summary: business_id ? `business_id=${business_id}` : `name=${name}`,
+    request_summary: requestSummaryParts.join(' '),
     result_count: results.length,
     succeeded,
     error_message: errorMessage
@@ -91,7 +131,7 @@ exports.handler = async (event) => {
     record_id: '00000000-0000-0000-0000-000000000000',
     action: 'search',
     field_name: 'prh_ytj',
-    new_value: business_id || name,
+    new_value: requestSummaryParts.join(' ') || null,
     changed_by: caller.id,
     partner_id: null
   });

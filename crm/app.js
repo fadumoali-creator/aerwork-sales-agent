@@ -332,17 +332,25 @@ function wireOwnerSearchChrome() {
   $('#ownerFiltersDrawerClose').addEventListener('click', closeFiltersDrawer);
   $('#ownerFiltersDrawerOverlay').addEventListener('click', closeFiltersDrawer);
   $('#ownerFiltersDrawerApply').addEventListener('click', () => {
+    const prevCity = ownerSearchFilters.city;
     ownerSearchFilters = {
       city: $('#fCity').value.trim(), industry: $('#fIndustry').value.trim(),
       crm: $('#fCrm').value, dm: $('#fDm').value, sort: $('#fSort').value
     };
     closeFiltersDrawer();
-    renderOwnerSearchResults();
+    // Kaupunki haetaan PRH:sta itse (location-parametri), ei vain
+    // jälkikäteissuodateta - jos kaupunki muuttui, pitää hakea uudestaan.
+    // Muut suotimet (toimiala/CRM/päättäjä/järjestys) suodattavat jo
+    // haettua tulosjoukkoa, eivät vaadi uutta hakua.
+    if (ownerSearchFilters.city !== prevCity) runOwnerCompanySearch();
+    else renderOwnerSearchResults();
   });
   $('#ownerClearFiltersBtn').addEventListener('click', () => {
+    const prevCity = ownerSearchFilters.city;
     ownerSearchFilters = { city: '', industry: '', crm: '', dm: '', sort: 'default' };
     $('#fCity').value = ''; $('#fIndustry').value = ''; $('#fCrm').value = ''; $('#fDm').value = ''; $('#fSort').value = 'default';
-    renderOwnerSearchResults();
+    if (prevCity) runOwnerCompanySearch();
+    else renderOwnerSearchResults();
   });
   $$('.view-toggle-btn', $('#ownerSearchViewToggle')).forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1028,8 +1036,14 @@ async function runOwnerCompanySearch() {
   const resultsEl = $('#ownerSearchResults');
   $('#ownerSearchMetaRow').classList.add('hidden');
 
-  if (!input) {
-    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Anna hakusana</div>Hae yrityksen nimellä tai Y-tunnuksella (esim. 1234567-8).</div>';
+  // Kaupunkisuodatin (Advanced Filters) haetaan PRH:n omalla
+  // location-parametrilla - tukee useaa kaupunkia pilkulla erotettuna
+  // (OR-haku, ks. owner-prh-search.js). Haku voi siis toimia joko
+  // nimellä/Y-tunnuksella, kaupungilla, tai molemmilla yhdessä.
+  const locations = (ownerSearchFilters.city || '').split(',').map((c) => c.trim()).filter(Boolean);
+
+  if (!input && !locations.length) {
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Anna hakusana tai kaupunki</div>Hae yrityksen nimellä, Y-tunnuksella (esim. 1234567-8), tai valitse kaupunki Lisää suotimet -valikosta.</div>';
     return;
   }
   const isBusinessId = BUSINESS_ID_PATTERN.test(input);
@@ -1038,12 +1052,16 @@ async function runOwnerCompanySearch() {
   resultsEl.innerHTML = Array.from({ length: 4 }, () => `
     <div class="search-card"><div class="skeleton skeleton-line short"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-card"></div></div>`).join('');
 
+  const body = {};
+  if (input) { if (isBusinessId) body.business_id = input; else body.name = input; }
+  if (locations.length) body.locations = locations;
+
   let resp, result;
   try {
     resp = await fetch('/.netlify/functions/owner-prh-search', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify(isBusinessId ? { business_id: input } : { name: input })
+      body: JSON.stringify(body)
     });
     result = await resp.json();
   } catch (err) {
@@ -1055,7 +1073,7 @@ async function runOwnerCompanySearch() {
     return;
   }
   if (!result.results.length) {
-    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei tuloksia</div>Tarkista kirjoitusasu tai kokeile Y-tunnuksella (muoto 1234567-8).</div>';
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei tuloksia</div>Tarkista kirjoitusasu, kokeile Y-tunnuksella (muoto 1234567-8), tai laajenna kaupunkihakua.</div>';
     return;
   }
 
@@ -1067,16 +1085,13 @@ async function runOwnerCompanySearch() {
 
 function filteredSortedOwnerSearchResults() {
   const f = ownerSearchFilters;
+  // Huom: kaupunkisuodatin EI enää suodata tätä listaa jälkikäteen - se
+  // haetaan PRH:sta suoraan location-parametrilla (ks. runOwnerCompanySearch),
+  // joten lastOwnerSearchResults täsmää jo kaupunkiin. Jälkikäteissuodatus
+  // poistettiin koska client-puolen postOffices-teksti ei aina täsmää
+  // täsmälleen PRH:n oman location-haun logiikkaan (esim. käynti- vs.
+  // postiosoite), mikä piilotti aidosti oikeita tuloksia.
   let rows = lastOwnerSearchResults.filter((r) => {
-    const address = (r.addresses || [])[0] || {};
-    const city = resolvePrhCity(address) || '';
-    if (f.city) {
-      // Tukee useampaa kaupunkia pilkulla erotettuna, OR-logiikalla
-      // (esim. "Helsinki, Espoo" täsmää kumpaankin).
-      const wanted = f.city.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
-      const cityLower = (city || '').toLowerCase();
-      if (wanted.length && !wanted.some((w) => cityLower.includes(w))) return false;
-    }
     if (f.industry && !(r.main_business_line || '').toLowerCase().includes(f.industry.toLowerCase())) return false;
     if (f.crm === 'in_crm' && !r.in_crm) return false;
     if (f.crm === 'not_in_crm' && r.in_crm) return false;
