@@ -53,4 +53,27 @@ function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-module.exports = { adminClient, getCallerProfile, json };
+// Roolihierarkia käyttäjähallinnan palvelinpuolen tarkistuksiin (peilaa
+// supabase/migrations/0008_user_management.sql:n profiles_admin_write-RLS-
+// policyn logiikkaa - TÄMÄ EI KORVAA RLS:ää, vain antaa ystävällisemmän
+// virheilmoituksen ennen kuin kutsu edes yrittää tietokantaan asti).
+const ROLE_RANK = { owner_super_admin: 100, super_admin: 80, partner_admin: 60, partner_user: 40, read_only: 20 };
+
+async function isOwnerAllowlisted(admin, callerId) {
+  const { data, error } = await admin.from('owner_allowlist').select('id').eq('user_id', callerId).eq('active', true).maybeSingle();
+  return !error && !!data;
+}
+
+// Palauttaa true jos "caller" saa hallinnoida (kutsua/muokata roolia/estää/
+// poistaa) "targetRole"-roolista käyttäjää. Owner saa kaiken paitsi ei voi
+// koskea toiseen omistajaan ilman erillistä varmistusta (käsitellään
+// kutsuvassa funktiossa erikseen viimeisen omistajan suojaksi).
+function canManageRole(callerRole, callerIsOwner, targetRole) {
+  if (callerIsOwner) return true;
+  if (targetRole === 'owner_super_admin') return false; // vain omistaja koskee omistajiin
+  if (callerRole === 'super_admin') return targetRole !== 'owner_super_admin';
+  if (callerRole === 'partner_admin') return ['partner_user', 'read_only'].includes(targetRole);
+  return false;
+}
+
+module.exports = { adminClient, getCallerProfile, json, ROLE_RANK, isOwnerAllowlisted, canManageRole };

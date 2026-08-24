@@ -156,6 +156,8 @@ textarea:focus-visible, [tabindex]:focus-visible{
   border-radius:var(--radius-sm); font-size:var(--text-sm); color:var(--text);
 }
 .dropdown-menu button:hover{background:var(--neutral-100);}
+.dropdown-menu button.danger-item{color:var(--error-600);}
+.dropdown-menu button.danger-item:hover{background:var(--error-100);}
 
 /* ---- Tabs (yrityksen 360-näkymää varten) ---- */
 .entity-tabs{display:flex; gap:2px; border-bottom:1px solid var(--border); overflow-x:auto;}
@@ -164,6 +166,9 @@ textarea:focus-visible, [tabindex]:focus-visible{
   color:var(--neutral-500); border-bottom:2px solid transparent; white-space:nowrap;
 }
 .entity-tab.active{color:var(--navy-700); border-color:var(--teal-600);}
+.user-tab-panel{margin-top:var(--space-4);}
+.pagination-row{display:flex; align-items:center; gap:12px; margin-top:var(--space-3); justify-content:flex-end;}
+.pagination-row button:disabled{opacity:.4; cursor:default;}
 
 /* ---- Drawer (mobiilisuodattimet ym.) ---- */
 .drawer-overlay{position:fixed; inset:0; background:rgba(22,31,56,.4); z-index:80;}
