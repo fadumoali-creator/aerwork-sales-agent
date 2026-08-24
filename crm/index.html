@@ -134,8 +134,61 @@
         <h2>Käyttäjät ja käyttöoikeudet</h2>
         <button class="btn-primary" id="inviteUserBtn">+ Kutsu käyttäjä</button>
       </div>
-      <div id="userList" class="table-scroll"></div>
+
+      <div id="userStatsRow" class="forecast-bar"></div>
+
+      <div class="entity-tabs" role="tablist" aria-label="Käyttäjähallinnan välilehdet">
+        <button type="button" class="entity-tab active" data-user-tab="users">Käyttäjät</button>
+        <button type="button" class="entity-tab" data-user-tab="invitations">Odottavat kutsut</button>
+        <button type="button" class="entity-tab" data-user-tab="roles">Roolit ja käyttöoikeudet</button>
+        <button type="button" class="entity-tab" data-user-tab="log">Lokikirja</button>
+      </div>
+
+      <div id="userTabUsers" class="user-tab-panel">
+        <div class="search-bar-row">
+          <div class="search-input-wrap">
+            <span class="search-input-icon" aria-hidden="true">🔍</span>
+            <input type="search" id="userSearchInput" placeholder="Hae nimellä tai sähköpostilla…" />
+          </div>
+          <select id="userRoleFilter"><option value="">Kaikki roolit</option></select>
+          <select id="userStatusFilter">
+            <option value="">Kaikki tilat</option>
+            <option value="active">Aktiivinen</option>
+            <option value="suspended">Käyttö estetty</option>
+            <option value="removed">Ei aktiivinen</option>
+          </select>
+          <select id="userOrgFilter" class="hidden"><option value="">Kaikki organisaatiot</option></select>
+        </div>
+        <div id="userListResults"></div>
+        <div id="userListPagination" class="pagination-row"></div>
+      </div>
+
+      <div id="userTabInvitations" class="user-tab-panel hidden">
+        <div id="invitationsResults"></div>
+      </div>
+
+      <div id="userTabRoles" class="user-tab-panel hidden">
+        <div id="rolesMatrix"></div>
+      </div>
+
+      <div id="userTabLog" class="user-tab-panel hidden">
+        <div class="search-bar-row">
+          <select id="userLogTypeFilter"><option value="">Kaikki tapahtumat</option></select>
+          <button class="btn-ghost small" id="userLogRefreshBtn">Päivitä</button>
+        </div>
+        <div id="userLogResults"></div>
+      </div>
     </section>
+
+    <!-- Käyttäjän kutsun sivupaneeli -->
+    <div class="drawer-overlay hidden" id="inviteDrawerOverlay"></div>
+    <div class="drawer hidden" id="inviteDrawer" role="dialog" aria-label="Kutsu käyttäjä" style="width:min(420px,92vw);">
+      <div class="view-head">
+        <h3 style="margin:0;">Kutsu käyttäjä</h3>
+        <button class="modal-close" id="inviteDrawerClose" style="position:static;" aria-label="Sulje">×</button>
+      </div>
+      <div id="inviteDrawerBody"></div>
+    </div>
 
     <!-- ===================== OWNER SUPER ADMIN -NÄKYMÄT ===================== -->
     <!-- Nämä näkyvät VAIN jos profile.role==='owner_super_admin' JA palvelin

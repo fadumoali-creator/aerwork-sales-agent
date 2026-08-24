@@ -56,5 +56,13 @@ jobs:
           TEST_FAKE_OWNER_PASSWORD: ${{ secrets.TEST_FAKE_OWNER_PASSWORD }}
         run: node tests/owner-rls-smoke-test.js
 
-      - name: Aja laskentayksikkötestit (MRR/ARR/komissio/Opportunity Score)
+      - name: Aja käyttäjähallinnan RLS-murtotesti
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TEST_PARTNER_A_EMAIL: ${{ secrets.TEST_PARTNER_A_EMAIL }}
+          TEST_PARTNER_A_PASSWORD: ${{ secrets.TEST_PARTNER_A_PASSWORD }}
+        run: node tests/user-management-rls-smoke-test.js
+
+      - name: Aja laskentayksikkötestit (MRR/ARR/komissio/Opportunity Score/Forecast)
         run: npm test

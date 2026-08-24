@@ -42,6 +42,43 @@ function money(n, currency) {
   return new Intl.NumberFormat('fi-FI', { style: 'currency', currency: currency || 'EUR' }).format(n);
 }
 
+// Toast-ilmoitukset selaimen alert()-kutsujen sijaan (vaatimuksen kohta 11:
+// "älä käytä selaimen oletusalertteja"). #toastHost on jo index.html:ssä.
+function showToast(message, type) {
+  const host = $('#toastHost');
+  const el = document.createElement('div');
+  el.className = `toast ${type || ''}`;
+  el.setAttribute('role', 'status');
+  el.textContent = message;
+  host.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
+// Vahvistusikkuna vaarallisille toiminnoille (kohta 8: nimi, toimenpide,
+// vaikutus, tarvittaessa syykenttä, selkeä vahvistuspainike, punainen
+// merkintä). Palauttaa Promisen jonka resolve-arvo on syy-tekstikentän
+// sisältö (tai tyhjä merkkijono) jos vahvistettiin, tai null jos peruttiin.
+function confirmDangerousAction({ title, body, confirmLabel, needsReason }) {
+  return new Promise((resolve) => {
+    const modalBody = $('#genericModalBody');
+    modalBody.innerHTML = `
+      <h3>⚠ ${escapeHtml(title)}</h3>
+      <p class="muted">${body}</p>
+      ${needsReason ? '<label class="full" style="display:block; margin-top:10px;">Syy (valinnainen)<textarea id="confirmReasonInput" rows="2" style="width:100%; margin-top:4px;"></textarea></label>' : ''}
+      <div class="form-actions">
+        <button type="button" class="btn-ghost" id="confirmCancelBtn">Peruuta</button>
+        <button type="button" class="btn-danger" id="confirmOkBtn">${escapeHtml(confirmLabel)}</button>
+      </div>`;
+    $('#genericModal').classList.remove('hidden');
+    const cleanup = (result) => { $('#genericModal').classList.add('hidden'); resolve(result); };
+    $('#confirmCancelBtn', modalBody).addEventListener('click', () => cleanup(null));
+    $('#confirmOkBtn', modalBody).addEventListener('click', () => {
+      const reason = needsReason ? ($('#confirmReasonInput', modalBody).value || '').trim() : '';
+      cleanup(reason);
+    });
+  });
+}
+
 // PRH/YTJ v3 -rajapinnan address.postOffices on lista SAMAN paikkakunnan
 // nimestä eri kielillä (languageCode: 1 = suomi, 2 = ruotsi, 3 = englanti),
 // ei useita eri paikkakuntia. Otettiin aiemmin virheellisesti vain
@@ -175,13 +212,28 @@ async function afterLogin() {
   await loadDashboard();
 }
 
-function roleLabel(role) {
-  return {
-    super_admin: 'AerWork Super Admin',
-    partner_admin: 'Partner Admin',
-    partner_user: 'Partner User',
-    read_only: 'Read Only'
-  }[role] || role;
+// Suomenkieliset roolinimet käyttöliittymään (kohta 11: "älä näytä
+// käyttäjälle teknistä tekstiä kuten owner_super_admin"). Tietokannan
+// roolikoodeja EI nimetä uudelleen - ks. 0008_user_management.sql:n
+// alkukommentti - vain nämä näyttönimet muuttuvat.
+const ROLE_LABELS = {
+  owner_super_admin: 'Omistaja / pääylläpitäjä',
+  super_admin: 'AerWork-ylläpitäjä',
+  partner_admin: 'Partnerin pääkäyttäjä',
+  partner_user: 'Myyjä',
+  read_only: 'Katselija'
+};
+function roleLabel(role) { return ROLE_LABELS[role] || role; }
+
+// Roolihierarkia (peilaa netlify/functions/_crm-shared.js:n ROLE_RANK/
+// canManageRole - kaksoiskappale, sama periaate kuin muissakin client-puolen
+// esikatseluissa: PALVELIN on aina lopullinen totuus, tämä ohjaa vain mitä
+// UI näyttää valittavaksi).
+function rolesManageableBy(callerRole, isOwner) {
+  if (isOwner) return ['super_admin', 'partner_admin', 'partner_user', 'read_only'];
+  if (callerRole === 'super_admin') return ['super_admin', 'partner_admin', 'partner_user', 'read_only'];
+  if (callerRole === 'partner_admin') return ['partner_user', 'read_only'];
+  return [];
 }
 
 // ---------------------------------------------------------------
@@ -317,7 +369,6 @@ function wireModals() {
   $('#companySearch').addEventListener('input', renderCompanyList);
   $('#statusFilter').addEventListener('change', renderCompanyList);
   $('#exportCsvBtn').addEventListener('click', exportCompaniesCsv);
-  $('#inviteUserBtn').addEventListener('click', openInviteUserModal);
   $('#ownerSearchBtn').addEventListener('click', runOwnerCompanySearch);
   $('#ownerSearchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runOwnerCompanySearch(); });
   $('#ownerAuditRefreshBtn').addEventListener('click', loadOwnerAuditLog);
@@ -1463,65 +1514,505 @@ async function completeFollowup(dataset) {
 }
 
 // ---------------------------------------------------------------
-// Käyttäjät (admin)
+// Käyttäjät ja käyttöoikeudet
 // ---------------------------------------------------------------
 
+const USER_PAGE_SIZE = 20;
+let userListCache = [];
+let userOrgsCache = [];
+let userFilters = { search: '', role: '', status: '', org: '' };
+let userPage = 1;
+let userTabsWired = false;
+const canSeeMultipleOrgs = () => isOwner || profile.role === 'super_admin';
+
 async function loadUsers() {
-  const { data, error } = await supabase.from('profiles').select('id, name, email, role, active').order('name');
-  if (error) {
-    $('#userList').innerHTML = `<p class="error-text">${error.message}</p>`;
-    return;
-  }
-  $('#userList').innerHTML = `
-    <table class="data"><thead><tr><th>Nimi</th><th>Sähköposti</th><th>Rooli</th><th>Tila</th></tr></thead>
-    <tbody>${(data || []).map((u) => `
-      <tr><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td><td>${roleLabel(u.role)}</td><td>${u.active ? 'Aktiivinen' : 'Ei aktiivinen'}</td></tr>
-    `).join('')}</tbody></table>`;
+  if (!userTabsWired) { wireUserTabs(); userTabsWired = true; }
+  await loadUserOrgsIfNeeded();
+  await loadUserStats();
+  await switchUserTab('users');
 }
 
-function openInviteUserModal() {
-  const body = $('#genericModalBody');
-  const roleOptions = profile.role === 'super_admin'
-    ? ['super_admin', 'partner_admin', 'partner_user', 'read_only']
-    : ['partner_user', 'read_only'];
+async function loadUserOrgsIfNeeded() {
+  if (!canSeeMultipleOrgs()) return;
+  const { data } = await supabase.from('organizations').select('id, name').order('name');
+  userOrgsCache = data || [];
+  $('#userOrgFilter').classList.remove('hidden');
+  $('#userOrgFilter').innerHTML = '<option value="">Kaikki organisaatiot</option>' +
+    userOrgsCache.map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+}
 
-  body.innerHTML = `
-    <h3>Kutsu käyttäjä</h3>
-    <form id="inviteForm" class="form-grid">
-      <label class="full">Sähköposti *<input type="email" required name="email" /></label>
-      <label class="full">Nimi *<input required name="name" /></label>
-      <label class="full">Rooli
-        <select name="role">${roleOptions.map((r) => `<option value="${r}">${roleLabel(r)}</option>`).join('')}</select>
-      </label>
-      <div class="form-actions full">
-        <button type="button" class="btn-ghost" data-close-modal>Peruuta</button>
-        <button type="submit" class="btn-primary">Lähetä kutsu</button>
-      </div>
-    </form>
-    <p id="inviteResult" class="muted small"></p>`;
-  $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+async function loadUserStats() {
+  const [{ data: profiles }, { data: invites }] = await Promise.all([
+    supabase.from('profiles').select('active, removed_at'),
+    supabase.from('invitations').select('status').eq('status', 'pending')
+  ]);
+  const total = (profiles || []).length;
+  const active = (profiles || []).filter((p) => p.active && !p.removed_at).length;
+  const suspended = (profiles || []).filter((p) => !p.active && !p.removed_at).length;
+  const pendingInvites = (invites || []).length;
 
-  $('#inviteForm', body).addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const payload = Object.fromEntries(fd.entries());
+  $('#userStatsRow').innerHTML = `
+    <div class="forecast-stat"><span class="fs-label">Käyttäjiä yhteensä</span><span class="fs-value">${total}</span></div>
+    <div class="forecast-stat"><span class="fs-label">Aktiivisia</span><span class="fs-value teal">${active}</span></div>
+    <div class="forecast-stat"><span class="fs-label">Odottavia kutsuja</span><span class="fs-value">${pendingInvites}</span></div>
+    <div class="forecast-stat ${suspended ? 'warn' : ''}"><span class="fs-label">Estettyjä</span><span class="fs-value">${suspended}</span></div>`;
+}
 
-    const resp = await fetch('/.netlify/functions/crm-invite-user', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify(payload)
-    });
-    const result = await resp.json();
-    if (!resp.ok) {
-      $('#inviteResult').textContent = `Virhe: ${result.error}`;
-      $('#inviteResult').classList.add('error-text');
-      return;
-    }
-    $('#inviteResult').textContent = 'Kutsu lähetetty onnistuneesti.';
-    await loadUsers();
+function wireUserTabs() {
+  $$('[data-user-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => switchUserTab(btn.dataset.userTab));
+  });
+  $('#userSearchInput').addEventListener('input', debounceUserFilter(() => { userFilters.search = $('#userSearchInput').value.trim().toLowerCase(); userPage = 1; renderUserList(); }));
+  $('#userRoleFilter').addEventListener('change', () => { userFilters.role = $('#userRoleFilter').value; userPage = 1; renderUserList(); });
+  $('#userStatusFilter').addEventListener('change', () => { userFilters.status = $('#userStatusFilter').value; userPage = 1; renderUserList(); });
+  $('#userOrgFilter').addEventListener('change', () => { userFilters.org = $('#userOrgFilter').value; userPage = 1; renderUserList(); });
+  $('#inviteUserBtn').addEventListener('click', openInviteDrawer);
+  $('#inviteDrawerClose').addEventListener('click', closeInviteDrawer);
+  $('#inviteDrawerOverlay').addEventListener('click', closeInviteDrawer);
+  $('#userLogRefreshBtn').addEventListener('click', loadUserLog);
+  $('#userLogTypeFilter').addEventListener('change', loadUserLog);
+
+  const roleFilter = $('#userRoleFilter');
+  roleFilter.innerHTML = '<option value="">Kaikki roolit</option>' +
+    Object.keys(ROLE_LABELS).map((r) => `<option value="${r}">${roleLabel(r)}</option>`).join('');
+}
+
+// Yksinkertainen debounce hakukentälle - vähentää turhia re-renderöintejä
+// nopean kirjoituksen aikana.
+function debounceUserFilter(fn, delay = 250) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+}
+
+function closeInviteDrawer() {
+  $('#inviteDrawer').classList.add('hidden');
+  $('#inviteDrawerOverlay').classList.add('hidden');
+}
+
+async function switchUserTab(tab) {
+  $$('[data-user-tab]').forEach((b) => b.classList.toggle('active', b.dataset.userTab === tab));
+  $('#userTabUsers').classList.toggle('hidden', tab !== 'users');
+  $('#userTabInvitations').classList.toggle('hidden', tab !== 'invitations');
+  $('#userTabRoles').classList.toggle('hidden', tab !== 'roles');
+  $('#userTabLog').classList.toggle('hidden', tab !== 'log');
+
+  if (tab === 'users') await loadUserList();
+  if (tab === 'invitations') await loadInvitationsList();
+  if (tab === 'roles') renderRolesMatrix();
+  if (tab === 'log') await loadUserLog();
+}
+
+async function loadUserList() {
+  const resultsEl = $('#userListResults');
+  resultsEl.innerHTML = Array.from({ length: 4 }, () => '<div class="skeleton skeleton-line"></div>').join('');
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, email, role, active, removed_at, organization_id, organizations(name), created_at')
+    .order('name');
+
+  if (error) {
+    resultsEl.innerHTML = `<div class="empty-state"><div class="es-title">Käyttäjien haku epäonnistui</div>${escapeHtml(error.message)} <button class="btn-ghost small" id="userListRetryBtn">Yritä uudelleen</button></div>`;
+    $('#userListRetryBtn', resultsEl)?.addEventListener('click', loadUserList);
+    return;
+  }
+  userListCache = data || [];
+  renderUserList();
+}
+
+function userStatusOf(u) {
+  if (u.removed_at) return { key: 'removed', label: 'Ei aktiivinen', cls: 'lost' };
+  if (!u.active) return { key: 'suspended', label: 'Käyttö estetty', cls: 'lost' };
+  return { key: 'active', label: 'Aktiivinen', cls: 'won' };
+}
+
+function renderUserList() {
+  const resultsEl = $('#userListResults');
+  let rows = userListCache.filter((u) => {
+    const status = userStatusOf(u).key;
+    if (userFilters.status && status !== userFilters.status) return false;
+    if (userFilters.role && u.role !== userFilters.role) return false;
+    if (userFilters.org && u.organization_id !== userFilters.org) return false;
+    if (userFilters.search && !`${u.name} ${u.email}`.toLowerCase().includes(userFilters.search)) return false;
+    return true;
   });
 
+  if (!rows.length) {
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei käyttäjiä hakuehdoilla</div>Kokeile toista hakusanaa tai tyhjennä suodattimet.</div>';
+    $('#userListPagination').innerHTML = '';
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / USER_PAGE_SIZE));
+  userPage = Math.min(userPage, totalPages);
+  const pageRows = rows.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
+
+  resultsEl.innerHTML = `
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Nimi</th><th>Sähköposti</th><th>Rooli</th><th>Organisaatio</th><th>Tila</th><th>Viimeisin kirjautuminen</th><th></th></tr></thead>
+      <tbody>${pageRows.map((u) => {
+        const status = userStatusOf(u);
+        return `<tr>
+          <td>${escapeHtml(u.name)}</td>
+          <td>${escapeHtml(u.email)}</td>
+          <td>${roleLabel(u.role)}</td>
+          <td>${escapeHtml(u.organizations ? u.organizations.name : '—')}</td>
+          <td><span class="status-pill ${status.cls}">${status.label}</span></td>
+          <td class="muted small">Ei tietoa</td>
+          <td>
+            <div class="dropdown">
+              <button class="btn-ghost small" data-action="toggle-more" data-user-id="${u.id}">⋯</button>
+              <div class="dropdown-menu hidden" data-more-menu="${u.id}">
+                ${userActionMenuHtml(u, status)}
+              </div>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    </div>`;
+  $('#userListPagination').innerHTML = totalPages > 1
+    ? `<button class="btn-ghost small" id="userPagePrev" ${userPage === 1 ? 'disabled' : ''}>‹ Edellinen</button>
+       <span class="muted small">Sivu ${userPage} / ${totalPages}</span>
+       <button class="btn-ghost small" id="userPageNext" ${userPage === totalPages ? 'disabled' : ''}>Seuraava ›</button>`
+    : '';
+  $('#userPagePrev')?.addEventListener('click', () => { userPage--; renderUserList(); });
+  $('#userPageNext')?.addEventListener('click', () => { userPage++; renderUserList(); });
+
+  wireUserRowActions(resultsEl);
+}
+
+// Vain toiminnot joihin kutsuja saattaa oikeasti olla oikeutettu näytetään -
+// palvelin tarkistaa aina vielä uudelleen (frontend ei ole ainoa portti,
+// kohta 12: "käyttöliittymän piilotetut painikkeet eivät yksin riitä").
+function userActionMenuHtml(u, status) {
+  const manageable = rolesManageableBy(profile.role, isOwner).includes(u.role);
+  const isSelf = u.id === profile.id;
+  const items = [];
+  items.push(`<button data-action="view-log" data-user-id="${u.id}">Näytä käyttäjän loki</button>`);
+  if (manageable && !isSelf) {
+    items.push(`<button data-action="change-role" data-user-id="${u.id}">Muokkaa roolia</button>`);
+    if (canSeeMultipleOrgs()) items.push(`<button data-action="transfer-org" data-user-id="${u.id}">Siirrä toiseen organisaatioon</button>`);
+    if (status.key === 'active') items.push(`<button data-action="suspend" data-user-id="${u.id}" class="danger-item">Estä pääsy</button>`);
+    if (status.key !== 'active') items.push(`<button data-action="reactivate" data-user-id="${u.id}">Palauta pääsy</button>`);
+    if (status.key !== 'removed') items.push(`<button data-action="remove" data-user-id="${u.id}" class="danger-item">Poista organisaatiosta</button>`);
+  }
+  return items.join('');
+}
+
+function wireUserRowActions(root) {
+  $$('[data-action="toggle-more"]', root).forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = root.querySelector(`[data-more-menu="${btn.dataset.userId}"]`);
+      const wasHidden = menu.classList.contains('hidden');
+      $$('.dropdown-menu', root).forEach((m) => m.classList.add('hidden'));
+      if (wasHidden) menu.classList.remove('hidden');
+    });
+  });
+  document.addEventListener('click', () => $$('.dropdown-menu', root).forEach((m) => m.classList.add('hidden')), { once: true });
+
+  $$('[data-action="view-log"]', root).forEach((btn) => btn.addEventListener('click', () => { switchUserTab('log'); }));
+  $$('[data-action="change-role"]', root).forEach((btn) => btn.addEventListener('click', () => openChangeRoleModal(btn.dataset.userId)));
+  $$('[data-action="transfer-org"]', root).forEach((btn) => btn.addEventListener('click', () => openTransferOrgModal(btn.dataset.userId)));
+  $$('[data-action="suspend"]', root).forEach((btn) => btn.addEventListener('click', () => doUserAction(btn.dataset.userId, 'suspend', {
+    title: 'Estä käyttäjän pääsy', confirmLabel: 'Estä pääsy',
+    body: bodyFor(btn.dataset.userId, 'Käyttäjän kaikki pääsy CRM:ään katkeaa välittömästi. Voit palauttaa pääsyn myöhemmin.')
+  })));
+  $$('[data-action="reactivate"]', root).forEach((btn) => btn.addEventListener('click', () => doUserAction(btn.dataset.userId, 'reactivate', {
+    title: 'Palauta käyttäjän pääsy', confirmLabel: 'Palauta pääsy',
+    body: bodyFor(btn.dataset.userId, 'Käyttäjä pääsee taas kirjautumaan ja käyttämään CRM:ää normaalisti.')
+  })));
+  $$('[data-action="remove"]', root).forEach((btn) => btn.addEventListener('click', () => doUserAction(btn.dataset.userId, 'remove', {
+    title: 'Poista käyttäjä organisaatiosta', confirmLabel: 'Poista organisaatiosta',
+    body: bodyFor(btn.dataset.userId, 'Käyttäjän pääsy katkeaa eikä hän enää näy aktiivisten käyttäjien listassa. Historia- ja lokitiedot säilyvät.'),
+    needsReason: true
+  })));
+}
+
+function bodyFor(userId, impact) {
+  const u = userListCache.find((x) => x.id === userId);
+  return `<strong>${escapeHtml(u ? u.name : '')}</strong> (${escapeHtml(u ? u.email : '')})<br/>${impact}`;
+}
+
+async function doUserAction(userId, action, confirmOpts) {
+  const reason = await confirmDangerousAction(confirmOpts);
+  if (reason === null) return;
+  const resp = await fetch('/.netlify/functions/crm-user-admin', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action, user_id: userId, reason: reason || undefined })
+  });
+  const result = await resp.json();
+  if (!resp.ok) { showToast(result.error || 'Toiminto epäonnistui.', 'error'); return; }
+  showToast('Toiminto onnistui.', 'success');
+  await loadUserStats();
+  await loadUserList();
+}
+
+function openChangeRoleModal(userId) {
+  const u = userListCache.find((x) => x.id === userId);
+  if (!u) return;
+  const options = rolesManageableBy(profile.role, isOwner);
+  const body = $('#genericModalBody');
+  body.innerHTML = `
+    <h3>Muokkaa roolia</h3>
+    <p class="muted">${escapeHtml(u.name)} (${escapeHtml(u.email)})</p>
+    <form id="changeRoleForm" class="form-grid">
+      <label class="full">Uusi rooli
+        <select name="new_role">${options.map((r) => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${roleLabel(r)}</option>`).join('')}</select>
+      </label>
+      <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Tallenna</button></div>
+    </form>`;
+  $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+  $('#changeRoleForm', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const resp = await fetch('/.netlify/functions/crm-user-admin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'change_role', user_id: userId, new_role: fd.get('new_role') })
+    });
+    const result = await resp.json();
+    if (!resp.ok) { showToast(result.error || 'Roolin vaihto epäonnistui.', 'error'); return; }
+    $('#genericModal').classList.add('hidden');
+    showToast('Rooli päivitetty.', 'success');
+    await loadUserList();
+  });
   $('#genericModal').classList.remove('hidden');
+}
+
+function openTransferOrgModal(userId) {
+  const u = userListCache.find((x) => x.id === userId);
+  if (!u) return;
+  const body = $('#genericModalBody');
+  body.innerHTML = `
+    <h3>Siirrä toiseen organisaatioon</h3>
+    <p class="muted">${escapeHtml(u.name)} (${escapeHtml(u.email)})</p>
+    <form id="transferOrgForm" class="form-grid">
+      <label class="full">Uusi organisaatio
+        <select name="new_organization_id">${userOrgsCache.map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('')}</select>
+      </label>
+      <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Siirrä</button></div>
+    </form>`;
+  $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+  $('#transferOrgForm', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const resp = await fetch('/.netlify/functions/crm-user-admin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'transfer_org', user_id: userId, new_organization_id: fd.get('new_organization_id') })
+    });
+    const result = await resp.json();
+    if (!resp.ok) { showToast(result.error || 'Siirto epäonnistui.', 'error'); return; }
+    $('#genericModal').classList.add('hidden');
+    showToast('Käyttäjä siirretty.', 'success');
+    await loadUserList();
+  });
+  $('#genericModal').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------
+// Odottavat kutsut
+// ---------------------------------------------------------------
+
+async function loadInvitationsList() {
+  const resultsEl = $('#invitationsResults');
+  resultsEl.innerHTML = Array.from({ length: 3 }, () => '<div class="skeleton skeleton-line"></div>').join('');
+
+  const resp = await fetch('/.netlify/functions/crm-invitations', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action: 'list' })
+  });
+  const result = await resp.json();
+  if (!resp.ok) {
+    resultsEl.innerHTML = `<div class="empty-state"><div class="es-title">Kutsujen haku epäonnistui</div>${escapeHtml(result.error || '')} <button class="btn-ghost small" id="inviteListRetryBtn">Yritä uudelleen</button></div>`;
+    $('#inviteListRetryBtn', resultsEl)?.addEventListener('click', loadInvitationsList);
+    return;
+  }
+  const invites = result.invitations || [];
+  if (!invites.length) {
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei odottavia kutsuja</div></div>';
+    return;
+  }
+
+  const STATUS_LABEL = { pending: 'Odottaa', accepted: 'Hyväksytty', expired: 'Vanhentunut', revoked: 'Peruttu' };
+  const STATUS_CLS = { pending: '', accepted: 'won', expired: 'lost', revoked: 'lost' };
+
+  resultsEl.innerHTML = `
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Nimi</th><th>Sähköposti</th><th>Rooli</th><th>Lähetetty</th><th>Vanhenee</th><th>Tila</th><th>Uudelleenlähetykset</th><th></th></tr></thead>
+      <tbody>${invites.map((inv) => `
+        <tr>
+          <td>${escapeHtml(inv.first_name)} ${escapeHtml(inv.last_name)}</td>
+          <td>${escapeHtml(inv.email)}</td>
+          <td>${roleLabel(inv.role)}</td>
+          <td>${fmtDate(inv.last_sent_at)}</td>
+          <td>${fmtDate(inv.expires_at)}</td>
+          <td><span class="status-pill ${STATUS_CLS[inv.status] || ''}">${STATUS_LABEL[inv.status] || inv.status}</span>
+            ${inv.last_send_error ? `<div class="muted small" style="color:var(--error-600);" title="${escapeHtml(inv.last_send_error)}">Sähköpostivirhe</div>` : ''}</td>
+          <td>${inv.resend_count}</td>
+          <td>${['pending', 'expired'].includes(inv.status) ? `
+            <button class="btn-ghost small" data-invite-action="resend" data-invite-id="${inv.id}">Lähetä uudelleen</button>
+            ${inv.status === 'pending' ? `<button class="btn-text small" data-invite-action="revoke" data-invite-id="${inv.id}">Peru</button>` : ''}
+          ` : ''}</td>
+        </tr>`).join('')}</tbody>
+    </table>
+    </div>`;
+
+  $$('[data-invite-action="resend"]', resultsEl).forEach((btn) => btn.addEventListener('click', () => doInvitationAction(btn.dataset.inviteId, 'resend')));
+  $$('[data-invite-action="revoke"]', resultsEl).forEach((btn) => btn.addEventListener('click', async () => {
+    const reason = await confirmDangerousAction({ title: 'Peru kutsu', confirmLabel: 'Peru kutsu', body: 'Kutsulinkki mitätöityy välittömästi eikä sitä voi enää hyväksyä.' });
+    if (reason === null) return;
+    doInvitationAction(btn.dataset.inviteId, 'revoke');
+  }));
+}
+
+async function doInvitationAction(invitationId, action) {
+  const resp = await fetch('/.netlify/functions/crm-invitations', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action, invitation_id: invitationId })
+  });
+  const result = await resp.json();
+  if (!resp.ok) { showToast(result.error || 'Toiminto epäonnistui.', 'error'); return; }
+  showToast(action === 'resend' ? 'Kutsu lähetetty uudelleen.' : 'Kutsu peruttu.', 'success');
+  await loadUserStats();
+  await loadInvitationsList();
+}
+
+function openInviteDrawer() {
+  const body = $('#inviteDrawerBody');
+  const roleOptions = rolesManageableBy(profile.role, isOwner);
+  body.innerHTML = `
+    <form id="inviteForm" class="form-grid">
+      <label>Etunimi *<input required name="first_name" /></label>
+      <label>Sukunimi *<input required name="last_name" /></label>
+      <label class="full">Sähköposti *<input type="email" required name="email" /></label>
+      <label class="full">Organisaatio *
+        <select name="organization_id" ${canSeeMultipleOrgs() ? '' : 'disabled'}>
+          ${canSeeMultipleOrgs()
+            ? userOrgsCache.map((o) => `<option value="${o.id}" ${o.id === profile.organization_id ? 'selected' : ''}>${escapeHtml(o.name)}</option>`).join('')
+            : `<option value="${profile.organization_id}">Oma organisaatio</option>`}
+        </select>
+      </label>
+      <label class="full">Rooli *
+        <select required name="role">${roleOptions.map((r) => `<option value="${r}">${roleLabel(r)}</option>`).join('')}</select>
+      </label>
+      <label>Puhelin<input name="phone" /></label>
+      <label>Tiimi<input name="team" /></label>
+      <label class="full">Kutsun mukana lähetettävä viesti<textarea name="message" rows="2"></textarea></label>
+      <div class="form-actions full">
+        <button type="button" class="btn-ghost" id="inviteDrawerCancel">Peruuta</button>
+        <button type="submit" class="btn-primary">Lähetä kutsu</button>
+      </div>
+    </form>`;
+  $('#inviteDrawerCancel', body).addEventListener('click', closeInviteDrawer);
+
+  const form = $('#inviteForm', body);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true; // estää kaksoislähetyksen
+    const fd = new FormData(form);
+    const payload = Object.fromEntries(fd.entries());
+    if (!canSeeMultipleOrgs()) payload.organization_id = profile.organization_id;
+
+    try {
+      const resp = await fetch('/.netlify/functions/crm-invite-user', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify(payload)
+      });
+      const result = await resp.json();
+      if (!resp.ok) { showToast(result.error || 'Kutsun lähetys epäonnistui.', 'error'); return; }
+      closeInviteDrawer();
+      showToast('Kutsu lähetetty onnistuneesti.', 'success');
+      await loadUserStats();
+      await loadUserList();
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  $('#inviteDrawer').classList.remove('hidden');
+  $('#inviteDrawerOverlay').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------
+// Roolit ja käyttöoikeudet - lukunäkymä (ei editoitava per-käyttäjä
+// permissions-matriisi tässä vaiheessa, ks. "Käyttäjähallinnan
+// määrittely" -dokumentti kohta 04: rajattu tietoisesti myöhempään
+// vaiheeseen ison RLS-uudelleenkirjoituksen vuoksi. Tämä näyttää REHELLISESTI
+// nykyisen, roolipohjaisen ja jo RLS:ssä todennetun mallin.)
+// ---------------------------------------------------------------
+
+const ROLE_MODULE_ACCESS = {
+  owner_super_admin: { Dashboard: 'Täysi', Yritykset: 'Täysi', Myyntiputki: 'Täysi', 'Follow-upit': 'Täysi', 'Buyer Intelligence': 'Täysi', 'Partner Management': 'Täysi', Käyttäjähallinta: 'Täysi', Lokikirja: 'Täysi (kaikki)', Asetukset: 'Täysi' },
+  super_admin: { Dashboard: 'Täysi', Yritykset: 'Täysi', Myyntiputki: 'Täysi', 'Follow-upit': 'Täysi', 'Buyer Intelligence': 'Ei oikeutta', 'Partner Management': 'Katselu', Käyttäjähallinta: 'Täysi (ei omistajaa)', Lokikirja: 'Täysi (valtuutetut org.)', Asetukset: 'Ei oikeutta' },
+  partner_admin: { Dashboard: 'Muokkaus', Yritykset: 'Muokkaus', Myyntiputki: 'Muokkaus', 'Follow-upit': 'Muokkaus', 'Buyer Intelligence': 'Ei oikeutta', 'Partner Management': 'Ei oikeutta', Käyttäjähallinta: 'Muokkaus (oma org.)', Lokikirja: 'Katselu (oma org.)', Asetukset: 'Ei oikeutta' },
+  partner_user: { Dashboard: 'Katselu', Yritykset: 'Muokkaus', Myyntiputki: 'Muokkaus', 'Follow-upit': 'Muokkaus', 'Buyer Intelligence': 'Ei oikeutta', 'Partner Management': 'Ei oikeutta', Käyttäjähallinta: 'Ei oikeutta', Lokikirja: 'Ei oikeutta', Asetukset: 'Ei oikeutta' },
+  read_only: { Dashboard: 'Katselu', Yritykset: 'Katselu', Myyntiputki: 'Katselu', 'Follow-upit': 'Katselu', 'Buyer Intelligence': 'Ei oikeutta', 'Partner Management': 'Ei oikeutta', Käyttäjähallinta: 'Ei oikeutta', Lokikirja: 'Ei oikeutta', Asetukset: 'Ei oikeutta' }
+};
+const MODULE_ORDER = ['Dashboard', 'Yritykset', 'Myyntiputki', 'Follow-upit', 'Buyer Intelligence', 'Partner Management', 'Käyttäjähallinta', 'Lokikirja', 'Asetukset'];
+
+function renderRolesMatrix() {
+  $('#rolesMatrix').innerHTML = `
+    <p class="muted small" style="max-width:64ch;">Nykyinen malli on roolipohjainen (RBAC) - jokainen käyttäjä saa yhden roolin, ja rooli määrää oikeudet alla olevan taulukon mukaisesti. Hienojakoisempi, per-käyttäjä muokattava oikeusmatriisi on suunniteltu mutta rajattu tietoisesti myöhempään vaiheeseen (vaatisi kaikkien tietokannan käyttöoikeussääntöjen uudelleenkirjoituksen).</p>
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Moduuli</th>${Object.keys(ROLE_LABELS).map((r) => `<th>${roleLabel(r)}</th>`).join('')}</tr></thead>
+      <tbody>${MODULE_ORDER.map((mod) => `<tr><td>${mod}</td>${Object.keys(ROLE_LABELS).map((r) => `<td>${ROLE_MODULE_ACCESS[r][mod]}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>
+    </div>`;
+}
+
+// ---------------------------------------------------------------
+// Lokikirja (käyttäjähallinnan tapahtumat)
+// ---------------------------------------------------------------
+
+const USER_LOG_TABLES = ['profiles', 'invitations'];
+
+async function loadUserLog() {
+  const resultsEl = $('#userLogResults');
+  resultsEl.innerHTML = Array.from({ length: 4 }, () => '<div class="skeleton skeleton-line"></div>').join('');
+
+  const typeFilter = $('#userLogTypeFilter').value;
+  let query = supabase.from('audit_log').select('*').in('table_name', USER_LOG_TABLES).order('changed_at', { ascending: false }).limit(200);
+  if (typeFilter) query = query.eq('action', typeFilter);
+  if (!isOwner && profile.role !== 'super_admin') query = query.eq('partner_id', profile.organization_id);
+
+  const { data, error } = await query;
+  if (error) {
+    resultsEl.innerHTML = `<div class="empty-state"><div class="es-title">Lokin haku epäonnistui</div>${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  if (!$('#userLogTypeFilter').options.length || $('#userLogTypeFilter').options.length <= 1) {
+    $('#userLogTypeFilter').innerHTML = '<option value="">Kaikki tapahtumat</option>' +
+      [...new Set((data || []).map((r) => r.action))].map((a) => `<option value="${a}">${a}</option>`).join('');
+  }
+  if (!data || !data.length) {
+    resultsEl.innerHTML = '<div class="empty-state"><div class="es-title">Ei lokitapahtumia</div></div>';
+    return;
+  }
+  resultsEl.innerHTML = `
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Aika</th><th>Taulu</th><th>Tapahtuma</th><th>Kenttä</th><th>Vanha arvo</th><th>Uusi arvo</th></tr></thead>
+      <tbody>${data.map((r) => `<tr>
+        <td>${fmtDateTime(r.changed_at)}</td>
+        <td>${escapeHtml(r.table_name)}</td>
+        <td>${escapeHtml(r.action)}</td>
+        <td>${escapeHtml(r.field_name || '—')}</td>
+        <td>${escapeHtml(r.old_value || '—')}</td>
+        <td>${escapeHtml(r.new_value || '—')}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    </div>`;
 }
 
 // =================================================================
