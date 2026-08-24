@@ -899,6 +899,9 @@ function opportunityCardHtml(o) {
         <span class="opp-days muted small">${days} pv vaiheessa</span>
       </div>
       <div class="opp-followup ${fuClass}">${fuLabel}</div>
+      <select class="opp-stage-select" data-no-open data-opp-id="${o.id}" title="Siirrä toiseen vaiheeseen">
+        ${pipelineStages.map((s) => `<option value="${s.id}" ${s.id === o.stage_id ? 'selected' : ''}>${escapeHtml(s.label_fi)}</option>`).join('')}
+      </select>
     </div>`;
 }
 
@@ -959,6 +962,20 @@ function wirePipelineCardOpen(board) {
   });
 }
 
+// Yhteinen "yritä siirtää vaihetta" -logiikka raahaukselle JA kortin omalle
+// vaihevalitsimelle (ks. alla - raahaus on osalle käyttäjistä hankalaa
+// esim. kosketuslevyllä, joten sama toiminto on aina saatavilla myös
+// pudotusvalikkona ilman raahausta).
+async function attemptMoveOpportunity(opp, targetStage, revertSelect) {
+  if (!opp || !targetStage || opp.stage_id === targetStage.id) return;
+  if (STAGE_TRANSITION_FORMS.has(targetStage.key)) {
+    openStageTransitionModal(opp, targetStage);
+    if (revertSelect) revertSelect(); // lomake voi vielä peruuntua - valitsin ei saa jäädä väärään tilaan
+    return;
+  }
+  await moveOpportunityToStage(opp, targetStage, {});
+}
+
 function wirePipelineDragDrop(board) {
   $$('.opp-card', board).forEach((card) => {
     card.addEventListener('dragstart', (e) => {
@@ -976,13 +993,19 @@ function wirePipelineDragDrop(board) {
       const oppId = e.dataTransfer.getData('text/plain');
       const targetStage = stageById(col.dataset.stageId);
       const opp = opportunitiesCache.find((o) => o.id === oppId);
-      if (!opp || !targetStage || opp.stage_id === targetStage.id) return;
-
-      if (STAGE_TRANSITION_FORMS.has(targetStage.key)) {
-        openStageTransitionModal(opp, targetStage);
-        return; // ei muuteta mitään ennen kuin lomake tallennetaan - kortti pysyy vanhassa sarakkeessa
-      }
-      await moveOpportunityToStage(opp, targetStage, {});
+      await attemptMoveOpportunity(opp, targetStage);
+    });
+  });
+  // Vaihdon voi tehdä myös suoraan kortin omasta pudotusvalikosta - ei vaadi
+  // raahausta ollenkaan, toimii yhtä lailla kosketusnäytöllä/kosketuslevyllä.
+  $$('.opp-stage-select', board).forEach((select) => {
+    select.addEventListener('mousedown', (e) => e.stopPropagation());
+    select.addEventListener('click', (e) => e.stopPropagation());
+    select.addEventListener('change', async (e) => {
+      const opp = opportunitiesCache.find((o) => o.id === select.dataset.oppId);
+      const targetStage = stageById(e.target.value);
+      const revert = () => { select.value = opp.stage_id; };
+      await attemptMoveOpportunity(opp, targetStage, revert);
     });
   });
 }
