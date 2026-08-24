@@ -368,6 +368,7 @@ function wireModals() {
   $('#newCompanyBtn').addEventListener('click', openNewCompanyModal);
   $('#companySearch').addEventListener('input', renderCompanyList);
   $('#statusFilter').addEventListener('change', renderCompanyList);
+  $('#claimFilter').addEventListener('change', renderCompanyList);
   $('#exportCsvBtn').addEventListener('click', exportCompaniesCsv);
   $('#ownerSearchBtn').addEventListener('click', runOwnerCompanySearch);
   $('#ownerSearchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runOwnerCompanySearch(); });
@@ -460,10 +461,11 @@ async function loadDashboard() {
   const grid = $('#kpiGrid');
   grid.innerHTML = '<p class="muted">Ladataan…</p>';
 
-  const [{ count: totalCompanies }, { data: openFollowups }, { data: deals }] = await Promise.all([
+  const [{ count: totalCompanies }, { data: openFollowups }, { data: deals }, { data: claimCompanies }] = await Promise.all([
     supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null),
     supabase.from('followup_tasks').select('due_date').eq('status', 'open'),
-    supabase.from('deals').select('mrr, arr, commission_amount').is('archived_at', null)
+    supabase.from('deals').select('mrr, arr, commission_amount').is('archived_at', null),
+    supabase.from('companies').select('claim_status, protection_expires_at, protection_started_at, converted_to_customer_at').is('archived_at', null)
   ]);
 
   const today = todayISO();
@@ -472,12 +474,28 @@ async function loadDashboard() {
   const totalArr = (deals || []).reduce((s, d) => s + (Number(d.arr) || 0), 0);
   const totalCommission = (deals || []).reduce((s, d) => s + (Number(d.commission_amount) || 0), 0);
 
+  // 90 päivän liidisuojan mittarit (kohta 15).
+  const claims = claimCompanies || [];
+  const activeClaims = claims.filter((c) => c.claim_status === 'active' && c.protection_expires_at && new Date(c.protection_expires_at) > new Date());
+  const expiringSoon = activeClaims.filter((c) => (new Date(c.protection_expires_at) - Date.now()) < 14 * 86400000);
+  const expiredClaims = claims.filter((c) => c.claim_status === 'expired');
+  const convertedClaims = claims.filter((c) => c.claim_status === 'converted_to_customer');
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const addedThisMonth = claims.filter((c) => c.protection_started_at && new Date(c.protection_started_at) >= monthStart).length;
+  const conversionRate = claims.length ? Math.round((convertedClaims.length / claims.length) * 100) : 0;
+
   const cards = [
     { label: 'Yrityksiä yhteensä', value: totalCompanies ?? 0 },
     { label: 'Myöhässä olevat follow-upit', value: overdueCount, alert: overdueCount > 0 },
     { label: 'MRR yhteensä', value: money(totalMrr) },
     { label: 'ARR yhteensä', value: money(totalArr) },
-    { label: 'Partnerikomissiot', value: money(totalCommission) }
+    { label: 'Partnerikomissiot', value: money(totalCommission) },
+    { label: 'Aktiiviset suojatut liidit', value: activeClaims.length },
+    { label: 'Tässä kuussa lisätyt liidit', value: addedThisMonth },
+    { label: 'Pian vanhenevat liidit (<14 pv)', value: expiringSoon.length, alert: expiringSoon.length > 0 },
+    { label: 'Vanhentuneet liidit', value: expiredClaims.length },
+    { label: 'Asiakkaiksi muutetut', value: convertedClaims.length },
+    { label: 'Liidi → asiakas -konversio', value: `${conversionRate}%` }
   ];
 
   grid.innerHTML = cards.map((c) => `
@@ -523,10 +541,20 @@ async function loadCompanies() {
 function renderCompanyList() {
   const q = $('#companySearch').value.trim().toLowerCase();
   const statusFilter = $('#statusFilter').value;
-  const today = todayISO();
+  const claimFilter = $('#claimFilter').value;
 
   const filtered = companiesCache.filter((c) => {
     if (statusFilter && c.status_id !== statusFilter) return false;
+    if (claimFilter) {
+      const claim = claimDisplayStatusClient(c);
+      if (claimFilter === 'active' && claim.key !== 'active') return false;
+      if (claimFilter === 'expiring_30' && !(claim.key === 'active' && claim.daysRemaining < 30)) return false;
+      if (claimFilter === 'expiring_14' && !(claim.key === 'active' && claim.daysRemaining < 14)) return false;
+      if (claimFilter === 'expiring_7' && !(claim.key === 'active' && claim.daysRemaining < 7)) return false;
+      if (claimFilter === 'expired' && claim.key !== 'expired') return false;
+      if (claimFilter === 'converted_to_customer' && claim.key !== 'converted_to_customer') return false;
+      if (claimFilter === 'under_review' && claim.key !== 'under_review') return false;
+    }
     if (!q) return true;
     return [c.name, c.city, c.contact_name, c.industry].filter(Boolean).some((v) => v.toLowerCase().includes(q));
   });
@@ -540,6 +568,7 @@ function renderCompanyList() {
   list.innerHTML = filtered.map((c) => {
     const status = c.lead_statuses;
     const pillClass = status ? (status.is_won ? 'won' : status.is_lost ? 'lost' : '') : '';
+    const claim = claimDisplayStatusClient(c);
     return `
       <div class="company-card" data-id="${c.id}">
         <div class="cc-main">
@@ -548,6 +577,7 @@ function renderCompanyList() {
         </div>
         <div class="cc-meta">
           <div><span class="lbl">Tila</span><span class="status-pill ${pillClass}">${status ? status.label_fi : '—'}</span></div>
+          <div><span class="lbl">Liidisuoja</span><span class="claim-status-pill color-${claim.color}">${claim.key === 'active' ? `${claim.daysRemaining} pv jäljellä` : claim.label}</span></div>
           <div><span class="lbl">Viim. yhteydenotto</span>${fmtDate(c.last_contacted_at)}</div>
           <div><span class="lbl">Arvo</span>${money(c.estimated_value, c.currency)}</div>
         </div>
@@ -590,70 +620,180 @@ function exportCompaniesCsv() {
   exportCsvRows(rows, ['Yritys', 'Maa', 'Kaupunki', 'Kontakti', 'Tila', 'ViimeisinYhteydenotto', 'ArvioituArvo', 'Valuutta']);
 }
 
+// 90 päivän liidisuoja: laskee ja näyttää käyttäjän omalla aikavyöhykkeellä,
+// tallennus tehdään aina UTC:ssä (tietokanta hoitaa tämän - ks.
+// fn_set_lead_protection, 0009_lead_claim_protection.sql).
+function fmtLocalDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('fi-FI', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+// Kaksoiskappale crm/lib/leadClaim.js:stä (testattu tests/lead-claim.test.js) -
+// pidettävä käsin synkassa, sama periaate kuin muuallakin tässä tiedostossa
+// (ei build-vaihetta CommonJS-tiedoston tuomiseksi ESM-moduuliin).
+const CLAIM_DISPLAY_CLIENT = {
+  converted_to_customer: { label: 'Muutettu asiakkaaksi', color: 'blue' },
+  released: { label: 'Vapautettu', color: 'gray' },
+  under_review: { label: 'Ylläpidon tarkistuksessa', color: 'gray' },
+  expired: { label: 'Vanhentunut', color: 'gray' }
+};
+function claimDisplayStatusClient(company) {
+  const status = company && company.claim_status;
+  if (status && CLAIM_DISPLAY_CLIENT[status]) return { key: status, ...CLAIM_DISPLAY_CLIENT[status], daysRemaining: 0, hoursRemaining: 0 };
+  const expiresAt = company && company.protection_expires_at;
+  const totalMs = expiresAt ? new Date(expiresAt).getTime() - Date.now() : 0;
+  if (!expiresAt || totalMs <= 0) return { key: 'expired', label: 'Vanhentunut', color: 'gray', daysRemaining: 0, hoursRemaining: 0 };
+  const days = Math.floor(totalMs / 86400000);
+  const hours = Math.floor((totalMs % 86400000) / 3600000);
+  let color = 'green';
+  if (days < 3) color = 'red'; else if (days < 14) color = 'orange';
+  return { key: 'active', label: `Liidisuoja aktiivinen – ${days} päivää jäljellä`, color, daysRemaining: days, hoursRemaining: hours };
+}
+
 function openNewCompanyModal() {
   const body = $('#genericModalBody');
+  const now = new Date();
+  const expiresPreview = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+
   body.innerHTML = `
     <h3>Uusi yritys</h3>
-    <div id="dupWarning"></div>
+    <div class="lead-protection-box">
+      <strong>90 päivän liidisuoja</strong>
+      <p class="muted small">Kun tallennat yrityksen, saat siihen 90 päivän liidisuojan. Suoja alkaa tallennushetkestä. Tänä aikana muut Certified Partnerit eivät voi varata samaa yritystä. Suoja päättyy automaattisesti 90 päivän kuluttua.</p>
+      <div class="lead-protection-dates">
+        <div><span class="lbl">Arvioitu alkaminen</span>${fmtLocalDateTime(now.toISOString())}</div>
+        <div><span class="lbl">Arvioitu päättyminen</span>${fmtLocalDateTime(expiresPreview.toISOString())}</div>
+        <div><span class="lbl">Kirjataan nimiin</span>${escapeHtml(profile.name)}</div>
+      </div>
+    </div>
+    <div id="claimCheckResult"></div>
     <form id="newCompanyForm" class="form-grid">
       <label class="full">Yrityksen nimi *<input required name="name" /></label>
-      <label>Y-tunnus / rekisterinumero<input name="business_id" /></label>
-      <label>Verkkosivu<input name="website" /></label>
-      <label>Maa<input name="country" /></label>
+      <label>Maa *<input required name="country" placeholder="esim. FI" /></label>
       <label>Kaupunki<input name="city" /></label>
+      <label>Y-tunnus / rekisterinumero<input name="business_id" placeholder="ensisijainen tunniste Suomessa" /></label>
+      <label>Verkkosivu<input name="website" /></label>
       <label>Toimiala<input name="industry" /></label>
       <label>Työntekijämäärä<input type="number" name="employee_count" /></label>
       <label>Yhteyshenkilön nimi<input name="contact_name" /></label>
       <label>Yhteyshenkilön titteli<input name="contact_title" /></label>
-      <label>Sähköposti<input type="email" name="contact_email" /></label>
+      <label>Yrityksen virallinen sähköposti<input type="email" name="contact_email" /></label>
       <label>Puhelin<input name="contact_phone" /></label>
       <label>Liidin lähde<input name="lead_source" /></label>
-      <label>Arvioitu arvo<input type="number" name="estimated_value" /></label>
       <label class="full">Muistiinpanot<textarea name="notes" rows="2"></textarea></label>
+      <p class="muted small full">* Nimi, maa ja vähintään yksi yksilöivä tieto (Y-tunnus, verkkosivu tai yrityksen virallinen sähköposti) vaaditaan.</p>
       <div class="form-actions full">
         <button type="button" class="btn-ghost" data-close-modal>Peruuta</button>
-        <button type="submit" class="btn-primary">Tallenna</button>
+        <button type="submit" class="btn-primary" id="newCompanySubmitBtn" disabled>Tallenna ja aktivoi 90 päivän suoja</button>
       </div>
     </form>`;
   $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
 
   const form = $('#newCompanyForm', body);
-  const dupWarning = $('#dupWarning', body);
+  const resultEl = $('#claimCheckResult', body);
+  const submitBtn = $('#newCompanySubmitBtn', body);
+  let lastCheck = null;       // viimeisin fn_check_lead_claim-tulos
+  let confirmedDifferent = false; // "Tämä on eri yritys" -vahvistus epävarmalle osumalle
 
-  ['name', 'business_id', 'website', 'contact_email', 'contact_phone'].forEach((field) => {
-    form[field]?.addEventListener('blur', async () => {
-      if (!form.name.value.trim()) return;
-      const { data } = await supabase.rpc('fn_check_company_duplicate', {
-        p_name: form.name.value,
-        p_business_id: form.business_id.value || null,
-        p_website: form.website.value || null,
-        p_email: form.contact_email.value || null,
-        p_phone: form.contact_phone.value || null
-      });
-      if (data && data.duplicate) {
-        dupWarning.innerHTML = `<div class="dup-warning">${escapeHtml(data.message)}</div>`;
-      } else {
-        dupWarning.innerHTML = '';
-      }
+  const runCheck = debounce(async () => {
+    const name = form.name.value.trim();
+    const country = form.country.value.trim();
+    if (!name || !country) { resultEl.innerHTML = ''; lastCheck = null; updateSubmitState(); return; }
+    confirmedDifferent = false;
+    const { data, error } = await supabase.rpc('fn_check_lead_claim', {
+      p_name: name, p_business_id: form.business_id.value || null, p_website: form.website.value || null,
+      p_country: country, p_city: form.city.value || null,
+      p_email: form.contact_email.value || null, p_phone: form.contact_phone.value || null
     });
+    lastCheck = error ? null : data;
+    renderCheckResult();
+    updateSubmitState();
+  }, 400);
+  ['name', 'country', 'city', 'business_id', 'website', 'contact_email', 'contact_phone'].forEach((f) => {
+    form[f]?.addEventListener('input', runCheck);
   });
+
+  function updateSubmitState() {
+    const requiredIdentifier = form.business_id.value.trim() || form.website.value.trim() || form.contact_email.value.trim();
+    const hasBasics = form.name.value.trim() && form.country.value.trim() && requiredIdentifier;
+    const result = lastCheck ? lastCheck.result : null;
+    const blocked = result === 'active_elsewhere' || result === 'own_active';
+    const uncertainNeedsConfirm = result === 'uncertain' && !confirmedDifferent;
+    submitBtn.disabled = !hasBasics || blocked || uncertainNeedsConfirm || result === 'expired_reclaimable';
+    // 'expired_reclaimable' käyttää eri toimintoa (vahvista varaus -painike renderCheckResult:ssa), ei tavallista submitia.
+  }
+
+  function renderCheckResult() {
+    if (!lastCheck) { resultEl.innerHTML = ''; return; }
+    const r = lastCheck;
+    if (r.result === 'none') {
+      resultEl.innerHTML = `<div class="claim-check-box ok">Yritystä ei löytynyt CRM:stä. Voit kirjata sen uutena liidinä.</div>`;
+    } else if (r.result === 'active_elsewhere') {
+      resultEl.innerHTML = `<div class="claim-check-box blocked">${escapeHtml(r.message)}</div>`;
+    } else if (r.result === 'own_active') {
+      resultEl.innerHTML = `<div class="claim-check-box own">Yritys on jo sinun liidilistallasi.
+        <button type="button" class="btn-ghost small" id="ccOpenOwnBtn">Avaa yritys</button></div>`;
+      $('#ccOpenOwnBtn', resultEl).addEventListener('click', () => { $('#genericModal').classList.add('hidden'); openCompanyModal(r.company_id); });
+    } else if (r.result === 'expired_reclaimable') {
+      resultEl.innerHTML = `<div class="claim-check-box expired">${escapeHtml(r.message)}
+        <button type="button" class="btn-primary small" id="ccReclaimBtn">Varaa yritys uudelleen</button></div>`;
+      $('#ccReclaimBtn', resultEl).addEventListener('click', async () => {
+        const { data, error } = await supabase.rpc('fn_reclaim_expired_company', {
+          p_company_id: r.company_id, p_owning_partner_id: profile.organization_id, p_created_by: profile.id
+        });
+        if (error || !data.ok) { showToast((data && data.error) || (error && error.message) || 'Varaus epäonnistui.', 'error'); return; }
+        $('#genericModal').classList.add('hidden');
+        showToast('Yritys varattu - 90 päivän suoja aktivoitu.', 'success');
+        await loadCompanies();
+        openCompanyModal(data.company.id);
+      });
+    } else if (r.result === 'uncertain') {
+      resultEl.innerHTML = `
+        <div class="claim-check-box uncertain">
+          CRM:stä löytyi mahdollisesti sama yritys. Tarkista tiedot ennen tallentamista.
+          <ul class="claim-candidates">${(r.candidates || []).map((c) => `<li>${escapeHtml(c.name)} — ${escapeHtml(c.country || '')} ${escapeHtml(c.city || '')} ${c.website ? '· ' + escapeHtml(c.website) : ''}${c.business_id ? ' · ' + escapeHtml(c.business_id) : ''}</li>`).join('')}</ul>
+          <div class="claim-candidates-actions">
+            <button type="button" class="btn-ghost small" id="ccSameBtn">Tämä on sama yritys</button>
+            <button type="button" class="btn-ghost small" id="ccDifferentBtn">Tämä on eri yritys</button>
+            <button type="button" class="btn-text small" id="ccReviewBtn">Lähetä ylläpidon tarkistettavaksi</button>
+          </div>
+        </div>`;
+      $('#ccSameBtn', resultEl).addEventListener('click', () => {
+        const candidateId = r.candidates && r.candidates[0] && r.candidates[0].company_id;
+        if (candidateId) { $('#genericModal').classList.add('hidden'); openCompanyModal(candidateId); }
+      });
+      $('#ccDifferentBtn', resultEl).addEventListener('click', () => { confirmedDifferent = true; updateSubmitState(); showToast('Merkitty eri yritykseksi - voit nyt tallentaa.', 'success'); });
+      $('#ccReviewBtn', resultEl).addEventListener('click', () => { flagForReviewAfterCreate = true; confirmedDifferent = true; updateSubmitState(); showToast('Yritys tallennetaan ylläpidon tarkistukseen tallennuksen yhteydessä.', 'success'); });
+    }
+  }
+
+  let flagForReviewAfterCreate = false;
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    submitBtn.disabled = true;
     const fd = new FormData(form);
     const payload = Object.fromEntries(fd.entries());
     payload.employee_count = payload.employee_count ? Number(payload.employee_count) : null;
-    payload.estimated_value = payload.estimated_value ? Number(payload.estimated_value) : null;
     payload.owning_partner_id = profile.organization_id;
     payload.created_by = profile.id;
     payload.status_id = leadStatuses.find((s) => s.key === 'new_lead')?.id || null;
+    payload.currency = 'EUR';
 
-    const { error } = await supabase.from('companies').insert(payload);
-    if (error) {
-      alert(`Tallennus epäonnistui: ${error.message}`);
+    const { data, error } = await supabase.rpc('fn_create_company_claim', { p_company: payload });
+    if (error || !data.ok) {
+      const msg = (data && data.check && data.check.message) || (error && error.message) || 'Tallennus epäonnistui.';
+      showToast(msg, 'error');
+      lastCheck = (data && data.check) || null;
+      renderCheckResult();
+      updateSubmitState();
       return;
     }
+    if (flagForReviewAfterCreate) {
+      await supabase.rpc('fn_flag_lead_for_review', { p_company_id: data.company.id, p_reason: 'Käyttäjä merkitsi epävarman osuman ylläpidon tarkistettavaksi tallennuksen yhteydessä.' });
+    }
     $('#genericModal').classList.add('hidden');
+    showToast('Yritys tallennettu ja 90 päivän suoja aktivoitu.', 'success');
     await loadCompanies();
   });
 
@@ -663,6 +803,124 @@ function openNewCompanyModal() {
 // ---------------------------------------------------------------
 // Yrityksen detail + aikajana
 // ---------------------------------------------------------------
+
+function wireLeadClaimSection(id, company, body) {
+  $('#convertToCustomerBtn', body)?.addEventListener('click', async () => {
+    const reason = await confirmDangerousAction({
+      title: 'Muuta asiakkaaksi', confirmLabel: 'Muuta asiakkaaksi',
+      body: `<strong>${escapeHtml(company.name)}</strong><br/>Yrityksen liidisuoja muuttuu pysyväksi asiakkuudeksi. Yritystä ei enää vapauteta muille partnereille 90 päivän jälkeen.`,
+      needsReason: true
+    });
+    if (reason === null) return;
+    const { data, error } = await supabase.rpc('fn_convert_lead_to_customer', { p_company_id: id, p_reason: reason || null });
+    if (error || !data.ok) { showToast((data && data.error) || (error && error.message) || 'Toiminto epäonnistui.', 'error'); return; }
+    showToast('Yritys muutettu asiakkaaksi.', 'success');
+    openCompanyModal(id);
+  });
+
+  $('#releaseClaimBtn', body)?.addEventListener('click', async () => {
+    const reason = await confirmDangerousAction({
+      title: 'Vapauta liidi', confirmLabel: 'Vapauta liidi',
+      body: `<strong>${escapeHtml(company.name)}</strong><br/>Liidisuoja päättyy välittömästi ja yritys vapautuu muiden Certified Partnerien varattavaksi.`,
+      needsReason: true
+    });
+    if (reason === null) return;
+    if (!reason) { showToast('Syy on pakollinen vapautukselle.', 'error'); return; }
+    const { data, error } = await supabase.rpc('fn_release_lead_claim', { p_company_id: id, p_reason: reason });
+    if (error || !data.ok) { showToast((data && data.error) || (error && error.message) || 'Toiminto epäonnistui.', 'error'); return; }
+    showToast('Liidi vapautettu.', 'success');
+    openCompanyModal(id);
+  });
+
+  $('#transferClaimBtn', body)?.addEventListener('click', async () => {
+    const { data: orgs } = await supabase.from('organizations').select('id, name').eq('type', 'certified_partner').neq('id', company.owning_partner_id);
+    const modalBody = $('#genericModalBody');
+    modalBody.innerHTML = `
+      <h3>Siirrä liidi toiselle partnerille</h3>
+      <p class="muted">${escapeHtml(company.name)}</p>
+      <form id="transferClaimForm" class="form-grid">
+        <label class="full">Uusi partneri<select name="new_partner_id">${(orgs || []).map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('')}</select></label>
+        <label class="full">Syy *<textarea required name="reason" rows="2"></textarea></label>
+        <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Siirrä</button></div>
+      </form>`;
+    $$('[data-close-modal]', modalBody).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+    $('#transferClaimForm', modalBody).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const { data, error } = await supabase.rpc('fn_transfer_lead_claim', {
+        p_company_id: id, p_new_partner_id: fd.get('new_partner_id'), p_reason: fd.get('reason')
+      });
+      if (error || !data.ok) { showToast((data && data.error) || (error && error.message) || 'Siirto epäonnistui.', 'error'); return; }
+      $('#genericModal').classList.add('hidden');
+      showToast('Liidi siirretty.', 'success');
+      $('#companyModal').classList.add('hidden');
+      await loadCompanies();
+    });
+    $('#genericModal').classList.remove('hidden');
+  });
+
+  $('#mergeDuplicateBtn', body)?.addEventListener('click', async () => {
+    const modalBody = $('#genericModalBody');
+    modalBody.innerHTML = `
+      <h3>Yhdistä duplikaattiyritys</h3>
+      <p class="muted">Säilytettävä (tämä) yritys: <strong>${escapeHtml(company.name)}</strong></p>
+      <p class="muted small">Vain SAMAN partnerin (${escapeHtml(company.owning_partner_id === profile.organization_id ? 'oma organisaatiosi' : company.owning_partner_id)}) virheellisesti kahdesti luotu yritys voidaan yhdistää. Poistettavan yrityksen historia (kontaktit, aktiviteetit, follow-upit, mahdollisuudet) siirtyy tälle riville - mitään ei kadoteta.</p>
+      <form id="mergeDupForm" class="form-grid">
+        <label class="full">Poistettavan (duplikaatti-) yrityksen nimi<input required name="dup_search" placeholder="Hae yrityksen nimellä…" /></label>
+        <div id="mergeDupCandidates" class="full"></div>
+        <label class="full">Syy *<textarea required name="reason" rows="2" placeholder="esim. Sama yritys kirjattu vahingossa kahdesti"></textarea></label>
+        <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-danger" id="mergeDupSubmitBtn" disabled>Yhdistä</button></div>
+      </form>`;
+    $$('[data-close-modal]', modalBody).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+
+    let selectedDupId = null;
+    const searchInput = $('[name="dup_search"]', modalBody);
+    const candidatesEl = $('#mergeDupCandidates', modalBody);
+    const submitBtn = $('#mergeDupSubmitBtn', modalBody);
+    searchInput.addEventListener('input', debounce(async () => {
+      selectedDupId = null; submitBtn.disabled = true;
+      const term = searchInput.value.trim();
+      if (term.length < 2) { candidatesEl.innerHTML = ''; return; }
+      const { data: candidates } = await supabase.from('companies').select('id, name, business_id, city')
+        .eq('owning_partner_id', company.owning_partner_id).neq('id', id).is('archived_at', null).ilike('name', `%${term}%`).limit(5);
+      candidatesEl.innerHTML = (candidates || []).map((c) => `
+        <button type="button" class="btn-ghost small" data-dup-id="${c.id}" style="display:block; width:100%; text-align:left; margin-bottom:4px;">
+          ${escapeHtml(c.name)} ${c.business_id ? `(${escapeHtml(c.business_id)})` : ''} ${c.city ? '· ' + escapeHtml(c.city) : ''}
+        </button>`).join('') || '<p class="muted small">Ei osumia.</p>';
+      $$('[data-dup-id]', candidatesEl).forEach((btn) => btn.addEventListener('click', () => {
+        selectedDupId = btn.dataset.dupId;
+        $$('[data-dup-id]', candidatesEl).forEach((b) => b.classList.remove('btn-primary'));
+        btn.classList.add('btn-primary');
+        submitBtn.disabled = false;
+      }));
+    }, 300));
+
+    $('#mergeDupForm', modalBody).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!selectedDupId) return;
+      const fd = new FormData(e.target);
+      const { data, error } = await supabase.rpc('fn_merge_duplicate_companies', {
+        p_keep_id: id, p_remove_id: selectedDupId, p_reason: fd.get('reason')
+      });
+      if (error || !data.ok) { showToast((data && data.error) || (error && error.message) || 'Yhdistäminen epäonnistui.', 'error'); return; }
+      $('#genericModal').classList.add('hidden');
+      showToast('Yritykset yhdistetty.', 'success');
+      openCompanyModal(id);
+    });
+    $('#genericModal').classList.remove('hidden');
+  });
+
+  $('#viewClaimLogBtn', body)?.addEventListener('click', async () => {
+    const box = $('#claimLogBox', body);
+    const { data, error } = await supabase.from('lead_claim_audit_log').select('*').eq('company_id', id).order('created_at', { ascending: false });
+    if (error) { box.innerHTML = `<p class="error-text">${escapeHtml(error.message)}</p>`; return; }
+    box.innerHTML = (data || []).length
+      ? `<table class="detail-table" style="margin-top:10px;"><tbody>${data.map((l) => `
+          <tr><td>${fmtDateTime(l.created_at)}</td><td>${escapeHtml(l.event_type)}${l.reason ? ' — ' + escapeHtml(l.reason) : ''}</td></tr>
+        `).join('')}</tbody></table>`
+      : '<p class="muted small">Ei lokitapahtumia.</p>';
+  });
+}
 
 async function openCompanyModal(id) {
   const body = $('#companyModalBody');
@@ -694,10 +952,31 @@ async function openCompanyModal(id) {
     ownerSection = { decisionMakers: dms || [], jobPostings: jobs || [], opportunityScore: score || null, partners: partners || [] };
   }
 
+  const claim = claimDisplayStatusClient(company);
+
   body.innerHTML = `
     <h3>${escapeHtml(company.name)}</h3>
     <p class="muted small">${escapeHtml(company.city || '')} ${escapeHtml(company.country || '')} · ${escapeHtml(company.industry || 'toimiala tuntematon')}</p>
     <p><span class="status-pill">${company.lead_statuses ? company.lead_statuses.label_fi : '—'}</span></p>
+
+    <div class="lead-claim-section color-${claim.color}">
+      <div class="lead-claim-title color-${claim.color}">${escapeHtml(claim.label)}</div>
+      <div class="lead-claim-grid">
+        <div><span class="lbl">Alkoi</span>${fmtLocalDateTime(company.protection_started_at)}</div>
+        <div><span class="lbl">Päättyy</span>${fmtLocalDateTime(company.protection_expires_at)}</div>
+        <div><span class="lbl">Vastuuhenkilö</span>${escapeHtml(company.responsible_user_id ? '—' : 'Ei asetettu')}</div>
+        <div><span class="lbl">Tila</span><span class="claim-status-pill color-${claim.color}">${escapeHtml(claim.key)}</span></div>
+      </div>
+      <div class="form-actions" style="margin-top:10px;">
+        ${claim.key === 'active' ? '<button class="btn-primary small" id="convertToCustomerBtn">Merkitse kauppa voitetuksi / Muuta asiakkaaksi</button>' : ''}
+        ${isOwner ? `
+          <button class="btn-ghost small" id="viewClaimLogBtn">Näytä suojan loki</button>
+          ${claim.key === 'active' ? '<button class="btn-ghost small" id="releaseClaimBtn">Vapauta liidi</button><button class="btn-ghost small" id="transferClaimBtn">Siirrä toiselle partnerille</button>' : ''}
+          <button class="btn-text small" id="mergeDuplicateBtn">Yhdistä duplikaattiyritys tähän</button>
+        ` : ''}
+      </div>
+      <div id="claimLogBox"></div>
+    </div>
 
     <h3 style="margin-top:20px;">Myyntiputken mahdollisuudet (${(companyOpps || []).length})</h3>
     ${(companyOpps || []).length ? `<ul>${companyOpps.map((o) => {
@@ -753,6 +1032,7 @@ async function openCompanyModal(id) {
   `;
 
   if (isOwner) wireOwnerCompanySection(id, company, ownerSection);
+  wireLeadClaimSection(id, company, body);
 
   $('#newOppFromCompanyBtn', body).addEventListener('click', () => {
     $('#companyModal').classList.add('hidden'); // ei jätetä kahta modaalia päällekkäin näkyviin
@@ -1562,7 +1842,7 @@ function wireUserTabs() {
   $$('[data-user-tab]').forEach((btn) => {
     btn.addEventListener('click', () => switchUserTab(btn.dataset.userTab));
   });
-  $('#userSearchInput').addEventListener('input', debounceUserFilter(() => { userFilters.search = $('#userSearchInput').value.trim().toLowerCase(); userPage = 1; renderUserList(); }));
+  $('#userSearchInput').addEventListener('input', debounce(() => { userFilters.search = $('#userSearchInput').value.trim().toLowerCase(); userPage = 1; renderUserList(); }));
   $('#userRoleFilter').addEventListener('change', () => { userFilters.role = $('#userRoleFilter').value; userPage = 1; renderUserList(); });
   $('#userStatusFilter').addEventListener('change', () => { userFilters.status = $('#userStatusFilter').value; userPage = 1; renderUserList(); });
   $('#userOrgFilter').addEventListener('change', () => { userFilters.org = $('#userOrgFilter').value; userPage = 1; renderUserList(); });
@@ -1579,7 +1859,7 @@ function wireUserTabs() {
 
 // Yksinkertainen debounce hakukentälle - vähentää turhia re-renderöintejä
 // nopean kirjoituksen aikana.
-function debounceUserFilter(fn, delay = 250) {
+function debounce(fn, delay = 250) {
   let t;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
 }
@@ -2370,38 +2650,49 @@ async function findDecisionMakerForSearchResult(idx, btn) {
 async function addExternalResultToCrm(record, opts = {}) {
   const address = (record.addresses || [])[0] || {};
 
-  // Duplikaattitarkistus AINA ennen lisäystä (kohta 10) - uudelleenkäyttää samaa
-  // fn_check_company_duplicate-funktiota kuin tavallinen "Uusi yritys" -lomake.
-  const { data: dup } = await supabase.rpc('fn_check_company_duplicate', {
-    p_name: record.name, p_business_id: record.business_id, p_website: null, p_email: null, p_phone: null
+  // Duplikaatti-/liidisuojatarkistus AINA ennen lisäystä (kohta 10), 90 päivän
+  // liidisuoja huomioiden - ks. supabase/migrations/0009_lead_claim_protection.sql.
+  const { data: check } = await supabase.rpc('fn_check_lead_claim', {
+    p_name: record.name, p_business_id: record.business_id, p_website: null,
+    p_country: 'FI', p_city: resolvePrhCity(address), p_email: null, p_phone: null
   });
 
-  if (dup && dup.duplicate) {
-    const proceed = confirm(
-      `${dup.message}${dup.owner_partner_name ? `\nOmistava partneri: ${dup.owner_partner_name}` : ''}\n\n` +
-      `Yritystä ei lisätä uudelleen. Avataanko olemassa oleva yritys?`
-    );
-    if (proceed && dup.company_id) await openCompanyModal(dup.company_id);
+  if (check && ['active_elsewhere', 'own_active'].includes(check.result)) {
+    const proceed = confirm(`${check.message}\n\nYritystä ei lisätä uudelleen. Avataanko olemassa oleva yritys?`);
+    if (proceed && check.company_id) await openCompanyModal(check.company_id);
     return null;
   }
+  if (check && check.result === 'expired_reclaimable') {
+    const proceed = confirm(`${check.message}\n\nVarataanko yritys nyt AerWorkille?`);
+    if (!proceed) return null;
+    const { data: reclaimed, error: reclaimErr } = await supabase.rpc('fn_reclaim_expired_company', {
+      p_company_id: check.company_id, p_owning_partner_id: AERWORK_ORG_ID, p_created_by: profile.id
+    });
+    if (reclaimErr || !reclaimed.ok) { showToast((reclaimed && reclaimed.error) || (reclaimErr && reclaimErr.message) || 'Varaus epäonnistui.', 'error'); return null; }
+    await openCompanyModal(reclaimed.company.id);
+    return reclaimed.company;
+  }
 
-  const { data: newCompany, error } = await supabase.from('companies').insert({
-    owning_partner_id: AERWORK_ORG_ID, // "pitää liidin vain AerWorkin omassa hallinnassa" kunnes osoitetaan partnerille
-    name: record.name,
-    business_id: record.business_id,
-    country: 'FI',
-    city: resolvePrhCity(address),
-    industry: record.main_business_line || null,
-    status_id: leadStatuses.find((s) => s.key === 'new_lead')?.id || null,
-    currency: 'EUR',
-    lead_source: 'owner_company_search',
-    created_by: profile.id
-  }).select().single();
+  const { data: claimResult, error } = await supabase.rpc('fn_create_company_claim', {
+    p_company: {
+      owning_partner_id: AERWORK_ORG_ID, // "pitää liidin vain AerWorkin omassa hallinnassa" kunnes osoitetaan partnerille
+      name: record.name,
+      business_id: record.business_id,
+      country: 'FI',
+      city: resolvePrhCity(address),
+      industry: record.main_business_line || null,
+      status_id: leadStatuses.find((s) => s.key === 'new_lead')?.id || null,
+      currency: 'EUR',
+      lead_source: 'owner_company_search',
+      created_by: profile.id
+    }
+  });
 
-  if (error) {
-    alert(`Lisäys epäonnistui: ${error.message}`);
+  if (error || !claimResult.ok) {
+    showToast((claimResult && claimResult.check && claimResult.check.message) || (error && error.message) || 'Lisäys epäonnistui.', 'error');
     return null;
   }
+  const newCompany = claimResult.company;
 
   // Säilytetään alkuperäinen lähdetieto pysyvästi, ei koskaan ylikirjoiteta.
   await supabase.from('external_company_records').insert({
@@ -2417,7 +2708,7 @@ async function addExternalResultToCrm(record, opts = {}) {
   });
 
   if (!opts.skipOpen) {
-    alert(`"${record.name}" lisätty CRM:ään.`);
+    showToast(`"${record.name}" lisätty CRM:ään.`, 'success');
     await openCompanyModal(newCompany.id);
   }
   return newCompany.id;

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "AerWork LinkedIn Sales Agent + Certified Partner CRM - Netlify Functions backend",
   "scripts": {
-    "test": "node --test tests/calc.test.js tests/opportunity-score.test.js tests/financial-growth.test.js tests/pipeline-forecast.test.js",
+    "test": "node --test tests/calc.test.js tests/opportunity-score.test.js tests/financial-growth.test.js tests/pipeline-forecast.test.js tests/lead-claim.test.js",
     "test:rls": "node tests/rls-smoke-test.js",
     "test:owner-rls": "node tests/owner-rls-smoke-test.js",
     "test:user-mgmt-rls": "node tests/user-management-rls-smoke-test.js"

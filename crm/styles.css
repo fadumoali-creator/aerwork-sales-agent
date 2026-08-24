@@ -434,6 +434,41 @@ h3{color:var(--navy-700); font-size:var(--text-md);}
 .form-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:16px;}
 .dup-warning{background:var(--warning-100); border:1px solid #F0D9A8; border-radius:var(--radius-sm); padding:10px 12px; font-size:var(--text-base); margin-top:10px;}
 
+/* ---- 90 päivän liidisuoja ---- */
+.lead-protection-box{background:var(--teal-100); border:1px solid var(--teal-600); border-radius:var(--radius-md); padding:12px 14px; margin-top:10px;}
+.lead-protection-box strong{color:var(--navy-700); font-size:var(--text-base);}
+.lead-protection-dates{display:flex; gap:20px; flex-wrap:wrap; margin-top:8px; font-size:var(--text-sm);}
+.lead-protection-dates .lbl{display:block; color:var(--neutral-500); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em;}
+.claim-check-box{border-radius:var(--radius-md); padding:12px 14px; margin:12px 0; font-size:var(--text-base); display:flex; flex-direction:column; gap:8px; align-items:flex-start;}
+.claim-check-box.ok{background:var(--success-100); color:var(--success-600);}
+.claim-check-box.blocked{background:var(--error-100); color:var(--error-600); font-weight:600;}
+.claim-check-box.own{background:var(--teal-100); color:var(--teal-600);}
+.claim-check-box.expired{background:var(--neutral-100); color:var(--neutral-500);}
+.claim-check-box.uncertain{background:var(--warning-100); color:var(--warning-600);}
+.claim-candidates{margin:4px 0 0; padding-left:18px; font-size:var(--text-sm); color:var(--text);}
+.claim-candidates-actions{display:flex; gap:8px; flex-wrap:wrap;}
+
+.lead-claim-section{border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px 16px; margin:14px 0;}
+.lead-claim-section.color-green{border-left:4px solid var(--success-600);}
+.lead-claim-section.color-orange{border-left:4px solid var(--warning-600);}
+.lead-claim-section.color-red{border-left:4px solid var(--error-600);}
+.lead-claim-section.color-gray{border-left:4px solid var(--neutral-500);}
+.lead-claim-section.color-blue{border-left:4px solid #2563EB;}
+.lead-claim-title{font-weight:700; font-size:var(--text-md); margin-bottom:8px;}
+.lead-claim-title.color-green{color:var(--success-600);}
+.lead-claim-title.color-orange{color:var(--warning-600);}
+.lead-claim-title.color-red{color:var(--error-600);}
+.lead-claim-title.color-gray{color:var(--neutral-500);}
+.lead-claim-title.color-blue{color:#2563EB;}
+.lead-claim-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; font-size:var(--text-sm);}
+.lead-claim-grid .lbl{display:block; color:var(--neutral-500); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em;}
+.claim-status-pill{display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:99px;}
+.claim-status-pill.color-green{background:var(--success-100); color:var(--success-600);}
+.claim-status-pill.color-orange{background:var(--warning-100); color:var(--warning-600);}
+.claim-status-pill.color-red{background:var(--error-100); color:var(--error-600);}
+.claim-status-pill.color-gray{background:var(--neutral-100); color:var(--neutral-500);}
+.claim-status-pill.color-blue{background:#DBEAFE; color:#2563EB;}
+
 .table-scroll{overflow-x:auto;}
 table.data{width:100%; border-collapse:collapse; font-size:var(--text-base);}
 table.data th{text-align:left; color:var(--neutral-500); font-size:var(--text-xs); text-transform:uppercase; letter-spacing:.03em; padding:8px 10px; border-bottom:1px solid var(--border);}

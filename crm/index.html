@@ -73,6 +73,16 @@
       <div class="filters">
         <input type="search" id="companySearch" placeholder="Hae nimellä, kaupungilla, kontaktilla…" />
         <select id="statusFilter"><option value="">Kaikki tilat</option></select>
+        <select id="claimFilter">
+          <option value="">Kaikki liidisuojat</option>
+          <option value="active">Aktiivinen suoja</option>
+          <option value="expiring_30">Päättyy 30 päivän sisällä</option>
+          <option value="expiring_14">Päättyy 14 päivän sisällä</option>
+          <option value="expiring_7">Päättyy 7 päivän sisällä</option>
+          <option value="expired">Vanhentunut</option>
+          <option value="converted_to_customer">Muutettu asiakkaaksi</option>
+          <option value="under_review">Ylläpidon tarkistuksessa</option>
+        </select>
         <button class="btn-ghost small" id="exportCsvBtn">Vie CSV</button>
       </div>
       <div id="companyList" class="company-list"></div>
@@ -377,6 +387,6 @@
 
 <div id="toastHost" aria-live="polite"></div>
 
-<script type="module" src="./app.js?v=20260824b"></script>
+<script type="module" src="./app.js?v=20260824c"></script>
 </body>
 </html>
