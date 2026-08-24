@@ -714,7 +714,12 @@ async function loadPipeline() {
         ${cardsInCol.map((c) => `
           <div class="kanban-card" draggable="true" data-company-id="${c.id}">
             <div class="kc-name">${escapeHtml(c.name)}</div>
-            <div class="kc-meta">${money(c.estimated_value, c.currency)}</div>
+            <div class="kc-meta">
+              <input type="number" class="kc-value-input" draggable="false"
+                     data-company-id="${c.id}" data-prev-value="${c.estimated_value ?? ''}"
+                     value="${c.estimated_value ?? ''}" min="0" step="100"
+                     placeholder="Lisää arvo (€)" title="Arvioitu arvo — tallentuu automaattisesti" />
+            </div>
           </div>`).join('')}
       </div>`;
   }).join('');
@@ -722,6 +727,35 @@ async function loadPipeline() {
   $$('.kanban-card', board).forEach((card) => {
     card.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', card.dataset.companyId);
+    });
+  });
+  $$('.kc-value-input', board).forEach((input) => {
+    // Estetään kortin raahaus kun käyttäjä muokkaa kenttää (input on
+    // draggable="false", mutta klikkaus/kirjoitus pitää silti pysäyttää
+    // ettei kortin oma dragstart-kuuntelija häiritse tekstivalintaa).
+    input.addEventListener('mousedown', (e) => e.stopPropagation());
+    input.addEventListener('click', (e) => e.stopPropagation());
+    const save = async () => {
+      const prev = input.dataset.prevValue;
+      const raw = input.value.trim();
+      const next = raw === '' ? null : Number(raw);
+      if (String(next ?? '') === String(prev ?? '')) return; // ei muutosta
+      // Kirjoitus companies-tauluun laukaisee audit_log-triggerin automaattisesti.
+      const { error: updErr } = await supabase
+        .from('companies')
+        .update({ estimated_value: next })
+        .eq('id', input.dataset.companyId);
+      if (updErr) {
+        alert(`Arvon tallennus epäonnistui: ${updErr.message}`);
+        input.value = prev;
+        return;
+      }
+      input.dataset.prevValue = next ?? '';
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') input.blur();
+      if (e.key === 'Escape') { input.value = input.dataset.prevValue; input.blur(); }
     });
   });
   $$('.kanban-col', board).forEach((col) => {
