@@ -653,26 +653,8 @@ function openInviteUserModal() {
         <button type="submit" class="btn-primary">Lähetä kutsu</button>
       </div>
     </form>
-    <p id="inviteResult" class="muted small"></p>
-    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);" />
-    <button type="button" class="btn-ghost small" id="runSelftestBtn">🔧 Aja diagnoosi (väliaikainen)</button>
-    <pre id="selftestResult" class="muted small" style="white-space:pre-wrap;margin-top:8px;"></pre>`;
+    <p id="inviteResult" class="muted small"></p>`;
   $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
-
-  $('#runSelftestBtn', body).addEventListener('click', async () => {
-    const out = $('#selftestResult', body);
-    out.textContent = 'Ajetaan...';
-    try {
-      const resp = await fetch('/.netlify/functions/crm-selftest', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${session.access_token}` }
-      });
-      const text = await resp.text();
-      out.textContent = text;
-    } catch (err) {
-      out.textContent = `Diagnoosin ajo epäonnistui: ${err.message}`;
-    }
-  });
 
   $('#inviteForm', body).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -686,7 +668,7 @@ function openInviteUserModal() {
     });
     const result = await resp.json();
     if (!resp.ok) {
-      $('#inviteResult').textContent = `Virhe: ${result.error}${result.debug_reason ? ` [${result.debug_reason}]` : ''}`;
+      $('#inviteResult').textContent = `Virhe: ${result.error}`;
       $('#inviteResult').classList.add('error-text');
       return;
     }
