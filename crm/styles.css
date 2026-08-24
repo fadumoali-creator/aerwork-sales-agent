@@ -86,6 +86,17 @@ input,select,textarea{font-family:inherit; font-size:14px;}
 .tab-sep{color:var(--border); padding:0 2px; align-self:center;}
 .owner-badge{background:var(--navy); color:#fff;}
 
+/* ---- Owner: Company Search kortin osiot ---- */
+.search-card{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-bottom:10px;}
+.search-card-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-top:10px;}
+.search-card-section h5{margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);}
+.search-card-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;}
+.growth-up{color:var(--green); font-weight:700;}
+.growth-down{color:var(--red); font-weight:700;}
+.growth-flat{color:var(--muted); font-weight:700;}
+.growth-unknown{color:var(--muted);}
+@media (max-width:720px){ .search-card-grid{grid-template-columns:1fr;} }
+
 main{flex:1; padding:20px; max-width:1200px; margin:0 auto; width:100%;}
 .view{display:none;}
 .view.active{display:block;}

@@ -100,16 +100,50 @@ exports.handler = async (event) => {
     return json(502, { error: errorMessage, results: [] });
   }
 
+  const mapped = results.map((c) => ({
+    name: c.names && c.names[0] ? c.names[0].name : null,
+    business_id: c.businessId ? c.businessId.value : null,
+    company_form: c.companyForms && c.companyForms[0] ? c.companyForms[0].type : null,
+    registration_date: c.registrationDate || null,
+    main_business_line: c.mainBusinessLine ? c.mainBusinessLine.type : null,
+    addresses: c.addresses || [],
+    raw: c
+  }));
+
+  // Rikastetaan JOKAINEN tulos tiedolla onko yritys jo CRM:ssä (Y-tunnuksen
+  // perusteella, ei paljasta omistavan partnerin nimeä täällä - sama
+  // luottamuksellisuusperiaate kuin fn_check_company_duplicate) sekä jo
+  // mahdollisesti löydetyllä päättäjällä. Ei koskaan keksitä liikevaihtoa/
+  // kasvua - niitä ei ole vielä saatavilla ilman maksullista lähdettä
+  // (ks. data_sources: financial_data = requires_paid_source).
+  const businessIds = mapped.map((m) => m.business_id).filter(Boolean);
+  let existingCompanies = [];
+  if (businessIds.length) {
+    const { data } = await admin.from('companies').select('id, business_id, status_id, archived_at').in('business_id', businessIds).is('archived_at', null);
+    existingCompanies = data || [];
+  }
+  const companyIds = existingCompanies.map((c) => c.id);
+  let topDecisionMakers = {};
+  if (companyIds.length) {
+    const { data: dms } = await admin.from('decision_makers').select('*').in('company_id', companyIds).order('found_at', { ascending: false });
+    (dms || []).forEach((d) => {
+      if (!topDecisionMakers[d.company_id]) topDecisionMakers[d.company_id] = d; // uusin per yritys, riittää kortille
+    });
+  }
+
+  const enriched = mapped.map((m) => {
+    const existing = existingCompanies.find((c) => c.business_id === m.business_id);
+    return {
+      ...m,
+      in_crm: !!existing,
+      existing_company_id: existing ? existing.id : null,
+      financial: { available: false, reason: 'requires_paid_source' }, // rehellinen tila - ei keksitä lukuja
+      decision_maker: existing && topDecisionMakers[existing.id] ? topDecisionMakers[existing.id] : null
+    };
+  });
+
   return json(200, {
-    results: results.map((c) => ({
-      name: c.names && c.names[0] ? c.names[0].name : null,
-      business_id: c.businessId ? c.businessId.value : null,
-      company_form: c.companyForms && c.companyForms[0] ? c.companyForms[0].type : null,
-      registration_date: c.registrationDate || null,
-      main_business_line: c.mainBusinessLine ? c.mainBusinessLine.type : null,
-      addresses: c.addresses || [],
-      raw: c
-    })),
+    results: enriched,
     source: 'prh_ytj',
     confidence: 'virallinen_rekisteri',
     fetched_at: new Date().toISOString()
