@@ -230,6 +230,7 @@ textarea:focus-visible, [tabindex]:focus-visible{
   background:var(--teal-100); color:var(--teal-600); text-transform:uppercase; letter-spacing:.03em;
 }
 .owner-badge{background:var(--navy-700); color:#fff;}
+.badge.alert{background:var(--error-100); color:var(--error-600);}
 
 .mobile-nav-toggle{display:none;}
 
@@ -427,7 +428,7 @@ h3{color:var(--navy-700); font-size:var(--text-md);}
 }
 .form-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin-top:14px;}
 .form-grid label{display:flex; flex-direction:column; gap:4px; font-size:var(--text-sm); font-weight:600; color:var(--navy-700);}
-.form-grid label.full{grid-column:1 / -1;}
+.form-grid label.full, .form-grid .full{grid-column:1 / -1;}
 .form-grid input, .form-grid select, .form-grid textarea{
   padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);
 }

@@ -225,6 +225,22 @@ const ROLE_LABELS = {
 };
 function roleLabel(role) { return ROLE_LABELS[role] || role; }
 
+// Kumppanitasot (Kumppanuus- ja Revenue Share -sopimus, Liite A). Kiinteät
+// sopimusarvot - Strategic-tason luvut ovat aina partnerikohtaisia (ks.
+// organizations.partner_custom_*), ei siis omaa riviä tässä.
+const PARTNER_TIER_LABELS = {
+  introduction: 'Introduction Partner',
+  sales: 'Sales Partner',
+  certified: 'Certified AerWork Partner',
+  strategic: 'Strategic Partner'
+};
+const PARTNER_TIER_DEFAULTS = {
+  introduction: { subscription_rate: 10, ai_credit_rate: 5, period_months: 12 },
+  sales: { subscription_rate: 15, ai_credit_rate: 7.5, period_months: 18 },
+  certified: { subscription_rate: 20, ai_credit_rate: 10, period_months: 24 }
+};
+function partnerTierLabel(level) { return level ? (PARTNER_TIER_LABELS[level] || level) : 'Ei asetettu (oletus: Introduction)'; }
+
 // Roolihierarkia (peilaa netlify/functions/_crm-shared.js:n ROLE_RANK/
 // canManageRole - kaksoiskappale, sama periaate kuin muissakin client-puolen
 // esikatseluissa: PALVELIN on aina lopullinen totuus, tämä ohjaa vain mitä
@@ -461,18 +477,24 @@ async function loadDashboard() {
   const grid = $('#kpiGrid');
   grid.innerHTML = '<p class="muted">Ladataan…</p>';
 
-  const [{ count: totalCompanies }, { data: openFollowups }, { data: deals }, { data: claimCompanies }] = await Promise.all([
+  const [{ count: totalCompanies }, { data: openFollowups }, { data: deals }, { data: claimCompanies }, { data: ledgerRows }] = await Promise.all([
     supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null),
     supabase.from('followup_tasks').select('due_date').eq('status', 'open'),
-    supabase.from('deals').select('mrr, arr, commission_amount').is('archived_at', null),
-    supabase.from('companies').select('claim_status, protection_expires_at, protection_started_at, converted_to_customer_at').is('archived_at', null)
+    supabase.from('deals').select('mrr, arr').is('archived_at', null),
+    supabase.from('companies').select('claim_status, protection_expires_at, protection_started_at, converted_to_customer_at').is('archived_at', null),
+    // Partnerikomissiot lasketaan commission_ledger-taulusta (kuukausittain,
+    // vain lukitun provisiokauden sisällä syntyneet rivit) - EI enää
+    // deals.commission_amount:sta, joka oli kertaluontoinen koko sopimuksen
+    // arvo eikä huomioinut kumppanitasoa/provisiokautta/AI-credit-osuutta.
+    // RLS rajaa automaattisesti: partneri näkee vain omat rivinsä, Owner kaikki.
+    supabase.from('commission_ledger').select('commission_amount')
   ]);
 
   const today = todayISO();
   const overdueCount = (openFollowups || []).filter((f) => f.due_date < today).length;
   const totalMrr = (deals || []).reduce((s, d) => s + (Number(d.mrr) || 0), 0);
   const totalArr = (deals || []).reduce((s, d) => s + (Number(d.arr) || 0), 0);
-  const totalCommission = (deals || []).reduce((s, d) => s + (Number(d.commission_amount) || 0), 0);
+  const totalCommission = (ledgerRows || []).reduce((s, r) => s + (Number(r.commission_amount) || 0), 0);
 
   // 90 päivän liidisuojan mittarit (kohta 15).
   const claims = claimCompanies || [];
@@ -489,7 +511,7 @@ async function loadDashboard() {
     { label: 'Myöhässä olevat follow-upit', value: overdueCount, alert: overdueCount > 0 },
     { label: 'MRR yhteensä', value: money(totalMrr) },
     { label: 'ARR yhteensä', value: money(totalArr) },
-    { label: 'Partnerikomissiot', value: money(totalCommission) },
+    { label: 'Partnerikomissiot', value: money(totalCommission), hint: 'Vain aktiivisen provisiokauden sisällä syntynyt, kuukausittain laskettu provisio (ks. Kumppanuus- ja Revenue Share -sopimus).' },
     { label: 'Aktiiviset suojatut liidit', value: activeClaims.length },
     { label: 'Tässä kuussa lisätyt liidit', value: addedThisMonth },
     { label: 'Pian vanhenevat liidit (<14 pv)', value: expiringSoon.length, alert: expiringSoon.length > 0 },
@@ -499,7 +521,7 @@ async function loadDashboard() {
   ];
 
   grid.innerHTML = cards.map((c) => `
-    <div class="kpi-card ${c.alert ? 'alert' : ''}">
+    <div class="kpi-card ${c.alert ? 'alert' : ''}" ${c.hint ? `title="${c.hint}"` : ''}>
       <div class="kpi-value">${c.value}</div>
       <div class="kpi-label">${c.label}</div>
     </div>
@@ -2316,7 +2338,7 @@ async function loadOwnerOverview() {
   const [
     { count: totalCompanies }, { count: newLeadCount }, { count: newThisWeek },
     { data: activitiesWeek }, { data: noContact }, { data: overdueFollowups },
-    { data: deals }, { data: openJobsHigh }, { data: pendingDMs }, { data: partners }
+    { data: deals }, { data: openJobsHigh }, { data: pendingDMs }, { data: partners }, { data: ledgerRows }
   ] = await Promise.all([
     supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null),
     supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null)
@@ -2325,15 +2347,18 @@ async function loadOwnerOverview() {
     supabase.from('activities').select('id', { count: 'exact', head: true }).gte('occurred_at', weekAgo),
     supabase.from('companies').select('id', { count: 'exact', head: true }).is('archived_at', null).is('last_contacted_at', null),
     supabase.from('followup_tasks').select('id', { count: 'exact', head: true }).eq('status', 'open').lt('due_date', today),
-    supabase.from('deals').select('mrr, arr, commission_amount, partner_id').is('archived_at', null),
+    supabase.from('deals').select('mrr, arr, partner_id').is('archived_at', null),
     supabase.from('job_postings').select('company_id').eq('status', 'open'),
     supabase.from('decision_makers').select('id', { count: 'exact', head: true }).eq('review_status', 'pending'),
-    supabase.from('organizations').select('id, name').eq('type', 'certified_partner')
+    supabase.from('organizations').select('id, name').eq('type', 'certified_partner'),
+    // Ks. loadDashboard()/loadOwnerPartnerPerformance() - sama periaate,
+    // provisio commission_ledgeristä, ei enää deals.commission_amount:sta.
+    supabase.from('commission_ledger').select('commission_amount')
   ]);
 
   const totalMrr = (deals || []).reduce((s, d) => s + (Number(d.mrr) || 0), 0);
   const totalArr = (deals || []).reduce((s, d) => s + (Number(d.arr) || 0), 0);
-  const totalCommission = (deals || []).reduce((s, d) => s + (Number(d.commission_amount) || 0), 0);
+  const totalCommission = (ledgerRows || []).reduce((s, r) => s + (Number(r.commission_amount) || 0), 0);
   const jobCountByCompany = {};
   (openJobsHigh || []).forEach((j) => { if (j.company_id) jobCountByCompany[j.company_id] = (jobCountByCompany[j.company_id] || 0) + 1; });
   const highJobCompanies = Object.values(jobCountByCompany).filter((n) => n >= 5).length;
@@ -3113,31 +3138,111 @@ function openSaveSearchModal() {
 // Partner Performance
 // ---------------------------------------------------------------
 
+let ownerPartnersCache = [];
+
 async function loadOwnerPartnerPerformance() {
   const el = $('#ownerPartnerPerformance');
   el.innerHTML = '<p class="muted">Ladataan…</p>';
 
-  const [{ data: partners }, { data: companies }, { data: deals }] = await Promise.all([
-    supabase.from('organizations').select('id, name, created_at').eq('type', 'certified_partner'),
-    supabase.from('companies').select('id, owning_partner_id').is('archived_at', null),
-    supabase.from('deals').select('partner_id, mrr, arr, commission_amount, status_id').is('archived_at', null)
+  const [{ data: partners }, { data: companies }, { data: deals }, { data: ledgerRows }] = await Promise.all([
+    supabase.from('organizations').select(
+      'id, name, created_at, partner_level, partner_level_set_at, partner_custom_subscription_rate, partner_custom_ai_credit_rate, partner_custom_period_months'
+    ).eq('type', 'certified_partner'),
+    supabase.from('companies').select('id, owning_partner_id, commission_period_ends_at').is('archived_at', null),
+    supabase.from('deals').select('partner_id, mrr, arr, status_id').is('archived_at', null),
+    // Kumppanuus- ja Revenue Share -sopimuksen mukainen provisio - vain
+    // lukitun provisiokauden sisällä, ei enää deals.commission_amount:sta.
+    supabase.from('commission_ledger').select('partner_id, commission_amount')
   ]);
+  ownerPartnersCache = partners || [];
 
+  const today = todayISO();
   el.innerHTML = `
     <table class="data">
-      <thead><tr><th>Certified Partner</th><th>Yrityksiä</th><th>Aktiivisia sopimuksia</th><th>MRR</th><th>ARR</th><th>Komissiot (avoin)</th></tr></thead>
+      <thead><tr>
+        <th>Certified Partner</th><th>Taso</th><th>Yrityksiä</th><th>Aktiivisia sopimuksia</th>
+        <th>MRR</th><th>ARR</th><th>Kertynyt provisio</th><th>Päättymässä (&lt;30 pv)</th><th></th>
+      </tr></thead>
       <tbody>${(partners || []).map((p) => {
         const partnerCompanies = (companies || []).filter((c) => c.owning_partner_id === p.id);
         const partnerDeals = (deals || []).filter((d) => d.partner_id === p.id);
         const mrr = partnerDeals.reduce((s, d) => s + (Number(d.mrr) || 0), 0);
         const arr = partnerDeals.reduce((s, d) => s + (Number(d.arr) || 0), 0);
-        const commission = partnerDeals.reduce((s, d) => s + (Number(d.commission_amount) || 0), 0);
+        const commission = (ledgerRows || []).filter((r) => r.partner_id === p.id)
+          .reduce((s, r) => s + (Number(r.commission_amount) || 0), 0);
+        const endingSoon = partnerCompanies.filter((c) => c.commission_period_ends_at
+          && c.commission_period_ends_at >= today
+          && (new Date(c.commission_period_ends_at) - Date.now()) < 30 * 86400000).length;
         return `<tr>
-          <td>${escapeHtml(p.name)}</td><td>${partnerCompanies.length}</td><td>${partnerDeals.length}</td>
+          <td>${escapeHtml(p.name)}</td>
+          <td><span class="badge">${escapeHtml(partnerTierLabel(p.partner_level))}</span></td>
+          <td>${partnerCompanies.length}</td><td>${partnerDeals.length}</td>
           <td>${money(mrr)}</td><td>${money(arr)}</td><td>${money(commission)}</td>
+          <td>${endingSoon > 0 ? `<span class="badge alert">${endingSoon}</span>` : '0'}</td>
+          <td><button type="button" class="btn-ghost small" data-change-tier="${p.id}">Muuta tasoa</button></td>
         </tr>`;
-      }).join('') || '<tr><td colspan="6">Ei Certified Partnereita vielä.</td></tr>'}</tbody>
+      }).join('') || '<tr><td colspan="9">Ei Certified Partnereita vielä.</td></tr>'}</tbody>
     </table>`;
+
+  $$('[data-change-tier]', el).forEach((b) => b.addEventListener('click', () => openChangePartnerLevelModal(b.dataset.changeTier)));
+}
+
+function openChangePartnerLevelModal(partnerId) {
+  const p = ownerPartnersCache.find((x) => x.id === partnerId);
+  if (!p) return;
+  const body = $('#genericModalBody');
+  const renderStrategicFields = (show) => `
+    <div id="strategicFieldsWrap" class="${show ? '' : 'hidden'}">
+      <p class="muted small">Strategic Partner -taso ei anna kiinteää prosenttia automaattisesti (sopimus: "25 %:n revenue share ei synny automaattisesti") - aseta tarkat arvot itse, korkeintaan sopimuksen kattoarvoihin asti.</p>
+      <label>Subscription Revenue Share, enint. 25 %
+        <input type="number" name="custom_subscription_rate" min="0" max="25" step="0.5" value="${p.partner_custom_subscription_rate ?? ''}" />
+      </label>
+      <label>AI Credit Revenue Share, enint. 15 %
+        <input type="number" name="custom_ai_credit_rate" min="0" max="15" step="0.5" value="${p.partner_custom_ai_credit_rate ?? ''}" />
+      </label>
+      <label>Provisiokausi kuukausina, enint. 24
+        <input type="number" name="custom_period_months" min="1" max="24" step="1" value="${p.partner_custom_period_months ?? ''}" />
+      </label>
+    </div>`;
+  body.innerHTML = `
+    <h3>Muuta kumppanitasoa</h3>
+    <p class="muted">${escapeHtml(p.name)} — nykyinen taso: ${escapeHtml(partnerTierLabel(p.partner_level))}</p>
+    <form id="changeTierForm" class="form-grid">
+      <label class="full">Uusi taso
+        <select name="new_level" id="newTierSelect">
+          ${Object.keys(PARTNER_TIER_LABELS).map((lvl) => `<option value="${lvl}" ${lvl === p.partner_level ? 'selected' : ''}>${PARTNER_TIER_LABELS[lvl]}${PARTNER_TIER_DEFAULTS[lvl] ? ` (${PARTNER_TIER_DEFAULTS[lvl].subscription_rate}% / ${PARTNER_TIER_DEFAULTS[lvl].period_months} kk)` : ''}</option>`).join('')}
+        </select>
+      </label>
+      <div class="full">${renderStrategicFields(p.partner_level === 'strategic')}</div>
+      <label class="full">Syy (pakollinen)
+        <textarea name="reason" rows="2" required placeholder="Esim. koulutus suoritettu, osoittanut itsenäistä myyntikykyä…"></textarea>
+      </label>
+      <p class="muted small full">Huom: muutos ei vaikuta jo käynnissä oleviin asiakkaiden provisiokausiin — vain uusiin, tämän jälkeen syntyviin Partner Customereihin.</p>
+      <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Tallenna</button></div>
+    </form>`;
+  $('#newTierSelect', body).addEventListener('change', (e) => {
+    $('#strategicFieldsWrap', body).classList.toggle('hidden', e.target.value !== 'strategic');
+  });
+  $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+  $('#changeTierForm', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const newLevel = fd.get('new_level');
+    const params = {
+      p_partner_id: partnerId,
+      p_new_level: newLevel,
+      p_reason: (fd.get('reason') || '').trim(),
+      p_custom_subscription_rate: newLevel === 'strategic' ? Number(fd.get('custom_subscription_rate')) || null : null,
+      p_custom_ai_credit_rate: newLevel === 'strategic' ? Number(fd.get('custom_ai_credit_rate')) || null : null,
+      p_custom_period_months: newLevel === 'strategic' ? Number(fd.get('custom_period_months')) || null : null
+    };
+    const { error } = await supabase.rpc('fn_set_partner_level', params);
+    if (error) { showToast(error.message || 'Tason muutos epäonnistui.', 'error'); return; }
+    $('#genericModal').classList.add('hidden');
+    showToast('Kumppanitaso päivitetty.', 'success');
+    await loadOwnerPartnerPerformance();
+  });
+  $('#genericModal').classList.remove('hidden');
 }
 
 // ---------------------------------------------------------------
