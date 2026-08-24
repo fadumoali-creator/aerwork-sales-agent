@@ -1,0 +1,44 @@
+name: RLS-eristystesti (Supabase)
+
+# Ajaa tests/rls-smoke-test.js:n oikeaa Supabase-projektia vasten GitHubin
+# palvelimella — ei vaadi ketään ajamaan mitään omalla koneellaan.
+# Käynnistys: GitHub-repo -> Actions-välilehti -> "RLS-eristystesti (Supabase)"
+# -> "Run workflow" -painike.
+#
+# Vaatii nämä Repository secrets (Settings -> Secrets and variables ->
+# Actions -> New repository secret):
+#   SUPABASE_URL
+#   SUPABASE_ANON_KEY
+#   TEST_PARTNER_A_EMAIL
+#   TEST_PARTNER_A_PASSWORD
+#   TEST_PARTNER_B_EMAIL
+#   TEST_PARTNER_B_PASSWORD
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  rls-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Asenna riippuvuudet
+        run: npm ci
+
+      - name: Aja RLS-murtotesti
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TEST_PARTNER_A_EMAIL: ${{ secrets.TEST_PARTNER_A_EMAIL }}
+          TEST_PARTNER_A_PASSWORD: ${{ secrets.TEST_PARTNER_A_PASSWORD }}
+          TEST_PARTNER_B_EMAIL: ${{ secrets.TEST_PARTNER_B_EMAIL }}
+          TEST_PARTNER_B_PASSWORD: ${{ secrets.TEST_PARTNER_B_PASSWORD }}
+        run: node tests/rls-smoke-test.js
+
+      - name: Aja laskentayksikkötestit (MRR/ARR/komissio)
+        run: npm test
