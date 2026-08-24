@@ -668,7 +668,7 @@ function openInviteUserModal() {
     });
     const result = await resp.json();
     if (!resp.ok) {
-      $('#inviteResult').textContent = `Virhe: ${result.error}`;
+      $('#inviteResult').textContent = `Virhe: ${result.error}${result.debug_reason ? ` [${result.debug_reason}]` : ''}`;
       $('#inviteResult').classList.add('error-text');
       return;
     }

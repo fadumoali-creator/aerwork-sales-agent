@@ -37,7 +37,11 @@ exports.handler = async (event) => {
     return json(500, { error: String((err && err.message) || err) });
   }
   if (!caller) {
-    return json(401, { error: 'Kirjautuminen vaaditaan (virheellinen tai puuttuva Authorization-header).' });
+    // VÄLIAIKAINEN: sisältää tarkan syyn diagnostiikkaa varten, ks. _crm-shared.js.
+    return json(401, {
+      error: 'Kirjautuminen vaaditaan (virheellinen tai puuttuva Authorization-header).',
+      debug_reason: getCallerProfile.lastReason || 'tuntematon (lastReason ei asettunut)'
+    });
   }
 
   const targetOrgId = organization_id || caller.organization_id;
