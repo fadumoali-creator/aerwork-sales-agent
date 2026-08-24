@@ -703,7 +703,10 @@ async function openCompanyModal(id) {
 
   if (isOwner) wireOwnerCompanySection(id, company, ownerSection);
 
-  $('#newOppFromCompanyBtn', body).addEventListener('click', () => openNewOpportunityModal(id));
+  $('#newOppFromCompanyBtn', body).addEventListener('click', () => {
+    $('#companyModal').classList.add('hidden'); // ei jätetä kahta modaalia päällekkäin näkyviin
+    openNewOpportunityModal(id);
+  });
   $$('[data-open-opp-from-company]', body).forEach((btn) => {
     btn.addEventListener('click', async () => {
       $('#companyModal').classList.add('hidden');
