@@ -49,6 +49,18 @@ function resolvePrhCity(address) {
   return (fi || list[0]).city || null;
 }
 
+// Kauppalehden yrityssivu Y-tunnuksen perusteella (esim.
+// https://www.kauppalehti.fi/yritykset/yritys/01845830 Y-tunnukselle
+// 0184583-0). Vain linkki käyttäjälle avattavaksi — ei mitään automaattista
+// hakua/skreippausta Kauppalehden sivulta (heidän yritystietonsa on oma
+// kaupallinen tuotteensa, ks. myös lukittu liikevaihtosuodatin).
+function kauppalehtiCompanyUrl(businessId) {
+  if (!businessId) return null;
+  const digitsOnly = String(businessId).replace(/[^0-9]/g, '');
+  if (!digitsOnly) return null;
+  return `https://www.kauppalehti.fi/yritykset/yritys/${digitsOnly}`;
+}
+
 // ---------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------
@@ -1159,6 +1171,7 @@ function searchCardHtml(r) {
             ${r.in_crm ? `<button data-action="open-company" data-idx="${idx}">Näytä yritys</button>` : ''}
             <button data-action="find-dm" data-idx="${idx}">${r.in_crm ? 'Etsi päättäjä' : 'Lisää CRM:ään ja etsi päättäjä'}</button>
             ${r.business_id ? `<button data-action="open-source" data-idx="${idx}">Avaa lähde (PRH-data)</button>` : ''}
+            ${r.business_id ? `<button data-action="open-kauppalehti" data-idx="${idx}">Avaa Kauppalehdessä ↗</button>` : ''}
           </div>
         </div>
       </div>
@@ -1203,6 +1216,11 @@ function wireSearchResultActions(resultsEl) {
   $$('[data-action="open-source"]', resultsEl).forEach((btn) => {
     const r = lastOwnerSearchResults[Number(btn.dataset.idx)];
     btn.addEventListener('click', () => window.open(`https://avoindata.prh.fi/opendata-ytj-api/v3/companies?businessId=${encodeURIComponent(r.business_id)}`, '_blank', 'noopener'));
+  });
+  $$('[data-action="open-kauppalehti"]', resultsEl).forEach((btn) => {
+    const r = lastOwnerSearchResults[Number(btn.dataset.idx)];
+    const url = kauppalehtiCompanyUrl(r.business_id);
+    if (url) btn.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
   });
   $$('[data-action="toggle-more"]', resultsEl).forEach((btn) => {
     btn.addEventListener('click', (e) => {
