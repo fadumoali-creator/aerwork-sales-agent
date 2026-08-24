@@ -1083,15 +1083,31 @@ async function runOwnerCompanySearch() {
   renderOwnerSearchResults();
 }
 
+// Tarkistaa täsmääkö tuloksen JOKIN osoite (ei vain ensimmäinen) johonkin
+// halutuista kaupungeista, JONKIN kielisen postOffices-nimen perusteella
+// (ei vain suomenkielisen) - maksimoi osumat, koska tätä käytetään
+// varmistuksena PRH:n oman location-haun päälle (ks. alla).
+function addressMatchesAnyCity(r, wantedLower) {
+  const addresses = r.addresses || [];
+  return addresses.some((address) => {
+    const pos = (address && address.postOffices) || [];
+    return pos.some((po) => {
+      const city = (po.city || '').toLowerCase();
+      return wantedLower.some((w) => city.includes(w));
+    });
+  });
+}
+
 function filteredSortedOwnerSearchResults() {
   const f = ownerSearchFilters;
-  // Huom: kaupunkisuodatin EI enää suodata tätä listaa jälkikäteen - se
-  // haetaan PRH:sta suoraan location-parametrilla (ks. runOwnerCompanySearch),
-  // joten lastOwnerSearchResults täsmää jo kaupunkiin. Jälkikäteissuodatus
-  // poistettiin koska client-puolen postOffices-teksti ei aina täsmää
-  // täsmälleen PRH:n oman location-haun logiikkaan (esim. käynti- vs.
-  // postiosoite), mikä piilotti aidosti oikeita tuloksia.
+  // Kaupunki haetaan PRH:sta suoraan location-parametrilla
+  // (ks. runOwnerCompanySearch) parhaan kattavuuden vuoksi, MUTTA PRH ei
+  // aina suodata luotettavasti yhdistettynä nimihakuun (havaittu käytännössä:
+  // nimihaku + location palautti myös muiden kaupunkien osumia). Siksi
+  // kaupunki tarkistetaan silti myös tässä varmistukseksi - "trust but verify".
+  const wantedCities = (f.city || '').split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
   let rows = lastOwnerSearchResults.filter((r) => {
+    if (wantedCities.length && !addressMatchesAnyCity(r, wantedCities)) return false;
     if (f.industry && !(r.main_business_line || '').toLowerCase().includes(f.industry.toLowerCase())) return false;
     if (f.crm === 'in_crm' && !r.in_crm) return false;
     if (f.crm === 'not_in_crm' && r.in_crm) return false;
