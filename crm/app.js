@@ -1011,7 +1011,13 @@ function filteredSortedOwnerSearchResults() {
   let rows = lastOwnerSearchResults.filter((r) => {
     const address = (r.addresses || [])[0] || {};
     const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : '';
-    if (f.city && !(city || '').toLowerCase().includes(f.city.toLowerCase())) return false;
+    if (f.city) {
+      // Tukee useampaa kaupunkia pilkulla erotettuna, OR-logiikalla
+      // (esim. "Helsinki, Espoo" täsmää kumpaankin).
+      const wanted = f.city.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+      const cityLower = (city || '').toLowerCase();
+      if (wanted.length && !wanted.some((w) => cityLower.includes(w))) return false;
+    }
     if (f.industry && !(r.main_business_line || '').toLowerCase().includes(f.industry.toLowerCase())) return false;
     if (f.crm === 'in_crm' && !r.in_crm) return false;
     if (f.crm === 'not_in_crm' && r.in_crm) return false;
