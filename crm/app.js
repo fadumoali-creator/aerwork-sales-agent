@@ -36,6 +36,19 @@ function money(n, currency) {
   return new Intl.NumberFormat('fi-FI', { style: 'currency', currency: currency || 'EUR' }).format(n);
 }
 
+// PRH/YTJ v3 -rajapinnan address.postOffices on lista SAMAN paikkakunnan
+// nimestä eri kielillä (languageCode: 1 = suomi, 2 = ruotsi, 3 = englanti),
+// ei useita eri paikkakuntia. Otettiin aiemmin virheellisesti vain
+// postOffices[0] — järjestys ei ole taattu, joten kaupunki saattoi näkyä
+// esim. ruotsiksi ("Helsingfors") eikä täsmännyt suomenkieliseen hakuun.
+// Tämä valitsee aina ensisijaisesti suomenkielisen nimen.
+function resolvePrhCity(address) {
+  const list = (address && address.postOffices) || [];
+  if (!list.length) return null;
+  const fi = list.find((po) => String(po.languageCode) === '1');
+  return (fi || list[0]).city || null;
+}
+
 // ---------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------
@@ -1044,7 +1057,7 @@ function filteredSortedOwnerSearchResults() {
   const f = ownerSearchFilters;
   let rows = lastOwnerSearchResults.filter((r) => {
     const address = (r.addresses || [])[0] || {};
-    const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : '';
+    const city = resolvePrhCity(address) || '';
     if (f.city) {
       // Tukee useampaa kaupunkia pilkulla erotettuna, OR-logiikalla
       // (esim. "Helsinki, Espoo" täsmää kumpaankin).
@@ -1112,7 +1125,7 @@ function decisionMakerBlockHtml(dm) {
 function searchCardHtml(r) {
   const idx = lastOwnerSearchResults.indexOf(r);
   const address = (r.addresses || [])[0] || {};
-  const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : null;
+  const city = resolvePrhCity(address);
 
   return `
     <div class="search-card" data-idx="${idx}">
@@ -1160,7 +1173,7 @@ function searchTableHtml(rows) {
       <tbody>${rows.map((r) => {
         const idx = lastOwnerSearchResults.indexOf(r);
         const address = (r.addresses || [])[0] || {};
-        const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : '—';
+        const city = resolvePrhCity(address) || '—';
         return `<tr>
           <td>${escapeHtml(r.name || '—')}</td>
           <td>${escapeHtml(r.business_id || '—')}</td>
@@ -1260,7 +1273,7 @@ async function addExternalResultToCrm(record, opts = {}) {
     name: record.name,
     business_id: record.business_id,
     country: 'FI',
-    city: address.postOffices && address.postOffices[0] ? address.postOffices[0].city : null,
+    city: resolvePrhCity(address),
     industry: record.main_business_line || null,
     status_id: leadStatuses.find((s) => s.key === 'new_lead')?.id || null,
     currency: 'EUR',
