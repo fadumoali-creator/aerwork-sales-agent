@@ -79,10 +79,37 @@
     </section>
 
     <section id="view-pipeline" class="view">
-      <h2>Myyntiputki</h2>
-      <p class="muted small">Vedä kortti toiseen sarakkeeseen vaihtaaksesi asiakkuuden tilan. Muutos kirjataan automaattisesti audit-lokiin.</p>
+      <div class="view-head">
+        <div>
+          <h2>Myyntiputki</h2>
+          <p class="muted small">Vedä kortti toiseen sarakkeeseen vaihtaaksesi vaihetta. Muutos kirjataan automaattisesti audit-lokiin.</p>
+        </div>
+        <button class="btn-primary" id="newOpportunityBtn">+ Uusi mahdollisuus</button>
+      </div>
+
+      <div id="pipelineForecastBar" class="forecast-bar"></div>
+
+      <div class="search-meta-row" style="margin-top:14px;">
+        <label class="checkbox-inline"><input type="checkbox" id="pipelineOnlyMine" /> Vain omat kauppani</label>
+        <div class="view-toggle" id="pipelineViewToggle" role="group" aria-label="Näkymän vaihto">
+          <button type="button" data-mode="kanban" class="view-toggle-btn active" aria-pressed="true">⊞ Kanban</button>
+          <button type="button" data-mode="table" class="view-toggle-btn" aria-pressed="false">☰ Taulukko</button>
+        </div>
+      </div>
+
       <div id="kanbanBoard" class="kanban-board"></div>
+      <div id="pipelineTableWrap" class="hidden"></div>
     </section>
+
+    <!-- Kaupan sivupaneeli: avautuu kortista, hakutila/scroll säilyy taustalla -->
+    <div class="drawer-overlay hidden" id="opportunityDrawerOverlay"></div>
+    <div class="drawer hidden" id="opportunityDrawer" role="dialog" aria-label="Mahdollisuuden tiedot" style="width:min(440px,92vw);">
+      <div class="view-head">
+        <h3 style="margin:0;" id="oppDrawerTitle">Mahdollisuus</h3>
+        <button class="modal-close" id="opportunityDrawerClose" style="position:static;" aria-label="Sulje">×</button>
+      </div>
+      <div id="opportunityDrawerBody"></div>
+    </div>
 
     <section id="view-followups" class="view">
       <h2>Kalenteri ja follow-upit</h2>

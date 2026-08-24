@@ -14,6 +14,12 @@ let profile = null; // { id, organization_id, role, name, email }
 let leadStatuses = [];
 let companiesCache = [];
 let isOwner = false; // vahvistettu palvelimelta (is_owner_super_admin() RPC), ei koskaan pelkkä UI-oletus
+let pipelineStages = []; // pipeline_stages, sort_order-järjestyksessä (ks. 0005_opportunities_pipeline.sql)
+let productsCache = [];
+let orgProfilesCache = []; // profiilit vastuuhenkilövalintoihin (oma partneri, tai kaikki jos owner)
+let opportunitiesCache = [];
+let pipelineOnlyMine = false;
+let pipelineViewMode = localStorage.getItem('aerwork_pipeline_view_mode') || 'kanban';
 
 const AERWORK_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -155,6 +161,11 @@ async function afterLogin() {
   const { data: statuses } = await supabase.from('lead_statuses').select('*').order('sort_order');
   leadStatuses = statuses || [];
   fillStatusFilter();
+
+  const { data: stages } = await supabase.from('pipeline_stages').select('*').eq('active', true).order('sort_order');
+  pipelineStages = stages || [];
+  const { data: prods } = await supabase.from('products').select('*').eq('active', true).order('name');
+  productsCache = prods || [];
 
   $('#logoutBtn').addEventListener('click', async () => {
     await supabase.auth.signOut();
@@ -318,6 +329,7 @@ function wireModals() {
   $('#ownerNewSavedSearchBtn').addEventListener('click', openSaveSearchModal);
   $('#ownerSavedSearchesBtn').addEventListener('click', () => switchView('owner-saved-searches'));
   wireOwnerSearchChrome();
+  wirePipelineChrome();
 }
 
 // ---------------------------------------------------------------
@@ -606,10 +618,11 @@ async function openCompanyModal(id) {
   body.innerHTML = '<p class="muted">Ladataan…</p>';
   $('#companyModal').classList.remove('hidden');
 
-  const [{ data: company, error: companyErr }, { data: activities }, { data: followups }] = await Promise.all([
+  const [{ data: company, error: companyErr }, { data: activities }, { data: followups }, { data: companyOpps }] = await Promise.all([
     supabase.from('companies').select('*, lead_statuses(label_fi)').eq('id', id).single(),
     supabase.from('activities').select('*').eq('company_id', id).order('occurred_at', { ascending: false }),
-    supabase.from('followup_tasks').select('*').eq('company_id', id).eq('status', 'open').order('due_date')
+    supabase.from('followup_tasks').select('*').eq('company_id', id).eq('status', 'open').order('due_date'),
+    supabase.from('opportunities').select('id, title, estimated_value, stage_id, products(name)').eq('company_id', id).is('archived_at', null)
   ]);
 
   if (companyErr || !company) {
@@ -634,6 +647,14 @@ async function openCompanyModal(id) {
     <h3>${escapeHtml(company.name)}</h3>
     <p class="muted small">${escapeHtml(company.city || '')} ${escapeHtml(company.country || '')} · ${escapeHtml(company.industry || 'toimiala tuntematon')}</p>
     <p><span class="status-pill">${company.lead_statuses ? company.lead_statuses.label_fi : '—'}</span></p>
+
+    <h3 style="margin-top:20px;">Myyntiputken mahdollisuudet (${(companyOpps || []).length})</h3>
+    ${(companyOpps || []).length ? `<ul>${companyOpps.map((o) => {
+      const s = stageById(o.stage_id);
+      return `<li>${escapeHtml(o.title || (o.products ? o.products.name : 'Mahdollisuus'))} — ${money(o.estimated_value)} · ${s ? escapeHtml(s.label_fi) : '—'} <button class="btn-text small" data-open-opp-from-company="${o.id}">Avaa</button></li>`;
+    }).join('')}</ul>` : '<p class="muted small">Ei vielä avoimia mahdollisuuksia.</p>'}
+    <button class="btn-ghost small" id="newOppFromCompanyBtn">+ Uusi mahdollisuus</button>
+
     <div class="form-grid" style="margin-top:6px;">
       <div><span class="lbl">Kontakti</span><br/>${escapeHtml(company.contact_name || '—')} ${company.contact_title ? `(${escapeHtml(company.contact_title)})` : ''}</div>
       <div><span class="lbl">Sähköposti / puhelin</span><br/>${escapeHtml(company.contact_email || '—')} / ${escapeHtml(company.contact_phone || '—')}</div>
@@ -682,6 +703,15 @@ async function openCompanyModal(id) {
 
   if (isOwner) wireOwnerCompanySection(id, company, ownerSection);
 
+  $('#newOppFromCompanyBtn', body).addEventListener('click', () => openNewOpportunityModal(id));
+  $$('[data-open-opp-from-company]', body).forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      $('#companyModal').classList.add('hidden');
+      await loadPipeline();
+      openOpportunityDrawer(btn.dataset.openOppFromCompany);
+    });
+  });
+
   $('#newActivityForm', body).addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -722,74 +752,217 @@ async function openCompanyModal(id) {
 }
 
 // ---------------------------------------------------------------
-// Myyntiputki (Kanban)
+// Myyntiputki — kauppa (opportunity) on OMA tietueensa, ei sama kuin yritys
+// (ks. supabase/migrations/0005_opportunities_pipeline.sql). Yhdellä
+// yrityksellä voi siis olla useita rinnakkaisia mahdollisuuksia.
+//
+// calcWeightedForecast/daysInStage/isStalled kaksoiskappale
+// crm/lib/pipelineForecast.js:stä (testattu tests/pipeline-forecast.test.js)
+// — pidettävä käsin synkassa, sama periaate kuin calcOpportunityScoreClient.
 // ---------------------------------------------------------------
+
+function calcWeightedForecastClient(opportunities) {
+  return (opportunities || []).reduce((acc, o) => {
+    const value = Number(o.estimated_value) || 0;
+    const probability = Math.max(0, Math.min(100, Number(o.probability) || 0));
+    acc.totalValue += value;
+    acc.weightedValue += value * (probability / 100);
+    acc.count += 1;
+    return acc;
+  }, { totalValue: 0, weightedValue: 0, count: 0 });
+}
+function daysInStageClient(stageEnteredAt, now) {
+  if (!stageEnteredAt) return 0;
+  const ms = (now ? new Date(now) : new Date()).getTime() - new Date(stageEnteredAt).getTime();
+  return Math.max(0, Math.floor(ms / 86400000));
+}
+function isStalledClient(opportunity, stage, now) {
+  if (!stage || stage.max_duration_days == null || stage.is_won || stage.is_lost) return false;
+  return daysInStageClient(opportunity.stage_entered_at, now) > stage.max_duration_days;
+}
+
+// Näihin vaiheisiin siirto avaa kevyen lomakkeen sen sijaan että vain
+// vaihtaisi statuksen — vain vaiheen kannalta välttämättömät kentät
+// (spesifikaation kohta 7: "älkää tehkö vaiheiden siirtämisestä raskasta").
+const STAGE_TRANSITION_FORMS = new Set(['meeting_demo', 'offer', 'won', 'lost']);
+
+function stageById(id) { return pipelineStages.find((s) => s.id === id); }
 
 async function loadPipeline() {
   const board = $('#kanbanBoard');
-  board.innerHTML = '<p class="muted">Ladataan…</p>';
+  board.innerHTML = Array.from({ length: 4 }, () => '<div class="kanban-col"><div class="skeleton skeleton-line short"></div><div class="skeleton skeleton-card"></div></div>').join('');
 
-  const { data: companiesData, error } = await supabase
-    .from('companies')
-    .select('id, name, estimated_value, currency, status_id')
-    .is('archived_at', null);
+  const [{ data: opps, error }, { data: profiles }] = await Promise.all([
+    supabase
+      .from('opportunities')
+      .select('*, companies(id, name, contact_name, contact_title, city, country), products(name), profiles!opportunities_responsible_user_id_fkey(id, name)')
+      .is('archived_at', null),
+    supabase.from('profiles').select('id, name').eq('active', true).order('name')
+  ]);
+  orgProfilesCache = profiles || [];
 
   if (error) {
-    board.innerHTML = `<p class="error-text">${error.message}</p>`;
+    board.innerHTML = `<div class="empty-state"><div class="es-title">Myyntiputken haku epäonnistui</div>${escapeHtml(error.message)}</div>`;
     return;
   }
 
-  board.innerHTML = leadStatuses.map((status) => {
-    const cardsInCol = (companiesData || []).filter((c) => c.status_id === status.id);
+  opportunitiesCache = opps || [];
+
+  // Avoimet follow-upit haetaan erikseen ja liitetään mahdollisuuteen
+  // opportunity_id:n perusteella (0005-migraation uusi sarake).
+  const oppIds = opportunitiesCache.map((o) => o.id);
+  let followupsByOpp = {};
+  if (oppIds.length) {
+    const { data: fus } = await supabase
+      .from('followup_tasks')
+      .select('*')
+      .eq('status', 'open')
+      .in('opportunity_id', oppIds)
+      .order('due_date');
+    (fus || []).forEach((f) => {
+      if (!followupsByOpp[f.opportunity_id]) followupsByOpp[f.opportunity_id] = f; // lähin riittää kortille
+    });
+  }
+  opportunitiesCache.forEach((o) => { o._nextFollowup = followupsByOpp[o.id] || null; });
+
+  renderPipeline();
+}
+
+function pipelineFilteredOpportunities() {
+  if (!pipelineOnlyMine) return opportunitiesCache;
+  return opportunitiesCache.filter((o) => o.responsible_user_id === profile.id);
+}
+
+function renderPipeline() {
+  const rows = pipelineFilteredOpportunities();
+  renderForecastBar(rows);
+  if (pipelineViewMode === 'kanban') {
+    $('#kanbanBoard').classList.remove('hidden');
+    $('#pipelineTableWrap').classList.add('hidden');
+    renderPipelineKanban(rows);
+  } else {
+    $('#kanbanBoard').classList.add('hidden');
+    $('#pipelineTableWrap').classList.remove('hidden');
+    renderPipelineTable(rows);
+  }
+}
+
+function renderForecastBar(rows) {
+  const open = rows.filter((o) => { const s = stageById(o.stage_id); return s && !s.is_won && !s.is_lost; });
+  const won = rows.filter((o) => { const s = stageById(o.stage_id); return s && s.is_won; });
+  const { totalValue, weightedValue, count } = calcWeightedForecastClient(open);
+  const stalled = open.filter((o) => isStalledClient(o, stageById(o.stage_id))).length;
+  const wonTotal = won.reduce((sum, o) => sum + (Number(o.estimated_value) || 0), 0);
+
+  $('#pipelineForecastBar').innerHTML = `
+    <div class="forecast-stat"><span class="fs-label">Avoin putki</span><span class="fs-value">${money(totalValue)}</span><span class="fs-sub">${count} kauppaa</span></div>
+    <div class="forecast-stat"><span class="fs-label">Painotettu ennuste</span><span class="fs-value teal">${money(weightedValue)}</span><span class="fs-sub">arvo × todennäköisyys</span></div>
+    <div class="forecast-stat"><span class="fs-label">Voitettu (näkyvät)</span><span class="fs-value">${money(wonTotal)}</span><span class="fs-sub">${won.length} kauppaa</span></div>
+    <div class="forecast-stat ${stalled ? 'warn' : ''}"><span class="fs-label">Pysähtyneet</span><span class="fs-value">${stalled}</span><span class="fs-sub">${stalled ? 'vaatii huomiota' : 'kaikki liikkeessä'}</span></div>`;
+}
+
+function opportunityCardHtml(o) {
+  const stage = stageById(o.stage_id);
+  const stalled = isStalledClient(o, stage);
+  const days = daysInStageClient(o.stage_entered_at);
+  const fu = o._nextFollowup;
+  const today = todayISO();
+  let fuClass = 'missing', fuLabel = 'Seuraavaa toimenpidettä ei ole määritelty.';
+  if (fu) {
+    if (fu.due_date < today) { fuClass = 'overdue'; fuLabel = `Myöhässä: ${escapeHtml(fu.description || 'Follow-up')} (${fmtDate(fu.due_date)})`; }
+    else if (fu.due_date === today) { fuClass = 'today'; fuLabel = `Tänään: ${escapeHtml(fu.description || 'Follow-up')}`; }
+    else { fuClass = 'upcoming'; fuLabel = `${fmtDate(fu.due_date)}: ${escapeHtml(fu.description || 'Follow-up')}`; }
+  }
+  const company = o.companies || {};
+  const resp = o.profiles;
+
+  return `
+    <div class="opp-card ${stalled ? 'stalled' : ''}" draggable="true" data-opp-id="${o.id}">
+      <div class="opp-top">
+        <div class="opp-name">${escapeHtml(company.name || '(yritys puuttuu)')}</div>
+        ${stalled ? `<span class="opp-stalled-badge" title="Ei liikettä ${days} päivään">⚠ Pysähtynyt</span>` : ''}
+      </div>
+      ${company.contact_name ? `<div class="opp-contact">${escapeHtml(company.contact_name)}${company.contact_title ? ' · ' + escapeHtml(company.contact_title) : ''}</div>` : ''}
+      <div class="opp-mid-row">
+        <span class="opp-product">${escapeHtml(o.products ? o.products.name : (o.title || 'Ei tuotetta valittu'))}</span>
+        <span class="opp-value">${money(o.estimated_value, o.currency)}</span>
+      </div>
+      <div class="opp-prob-row" title="Todennäköisyys ${o.probability}%">
+        <div class="opp-prob-bar"><div class="opp-prob-fill" style="width:${o.probability}%"></div></div>
+        <span class="opp-prob-pct">${o.probability}%</span>
+      </div>
+      <div class="opp-bottom">
+        <span class="opp-resp" title="Vastuuhenkilö">${resp ? escapeHtml(initials(resp.name)) : '—'}</span>
+        <span class="opp-days muted small">${days} pv vaiheessa</span>
+      </div>
+      <div class="opp-followup ${fuClass}">${fuLabel}</div>
+    </div>`;
+}
+
+function initials(name) {
+  return String(name || '').split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
+}
+
+function renderPipelineKanban(rows) {
+  const board = $('#kanbanBoard');
+  board.innerHTML = pipelineStages.map((stage) => {
+    const cards = rows.filter((o) => o.stage_id === stage.id);
+    const total = cards.reduce((sum, o) => sum + (Number(o.estimated_value) || 0), 0);
     return `
-      <div class="kanban-col" data-status-id="${status.id}">
-        <h4>${status.label_fi} (${cardsInCol.length})</h4>
-        ${cardsInCol.map((c) => `
-          <div class="kanban-card" draggable="true" data-company-id="${c.id}">
-            <div class="kc-name">${escapeHtml(c.name)}</div>
-            <div class="kc-meta">
-              <input type="number" class="kc-value-input" draggable="false"
-                     data-company-id="${c.id}" data-prev-value="${c.estimated_value ?? ''}"
-                     value="${c.estimated_value ?? ''}" min="0" step="100"
-                     placeholder="Lisää arvo (€)" title="Arvioitu arvo — tallentuu automaattisesti" />
-            </div>
-          </div>`).join('')}
+      <div class="kanban-col ${stage.is_won ? 'col-won' : stage.is_lost ? 'col-lost' : ''}" data-stage-id="${stage.id}">
+        <h4>${escapeHtml(stage.label_fi)} <span class="col-count">${cards.length}</span></h4>
+        <div class="col-total muted small">${money(total)}</div>
+        ${cards.length ? cards.map(opportunityCardHtml).join('') : '<div class="empty-state small">Ei kauppoja</div>'}
       </div>`;
   }).join('');
 
-  $$('.kanban-card', board).forEach((card) => {
-    card.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', card.dataset.companyId);
+  wirePipelineDragDrop(board);
+  wirePipelineCardOpen(board);
+}
+
+function renderPipelineTable(rows) {
+  const wrap = $('#pipelineTableWrap');
+  if (!rows.length) { wrap.innerHTML = '<div class="empty-state"><div class="es-title">Ei kauppoja</div></div>'; return; }
+  wrap.innerHTML = `
+    <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Yritys</th><th>Vaihe</th><th>Tuote</th><th>Arvo</th><th>Tod.näk.</th><th>Vastuuhenkilö</th><th>Seuraava follow-up</th><th></th></tr></thead>
+      <tbody>${rows.map((o) => {
+        const stage = stageById(o.stage_id);
+        const fu = o._nextFollowup;
+        const stalled = isStalledClient(o, stage);
+        return `<tr class="${stalled ? 'row-stalled' : ''}">
+          <td>${escapeHtml((o.companies || {}).name || '—')}</td>
+          <td>${stage ? escapeHtml(stage.label_fi) : '—'}${stalled ? ' ⚠' : ''}</td>
+          <td>${escapeHtml(o.products ? o.products.name : (o.title || '—'))}</td>
+          <td>${money(o.estimated_value, o.currency)}</td>
+          <td>${o.probability}%</td>
+          <td>${o.profiles ? escapeHtml(o.profiles.name) : '—'}</td>
+          <td>${fu ? fmtDate(fu.due_date) : '<span class="muted">puuttuu</span>'}</td>
+          <td><button class="btn-ghost small" data-open-opp="${o.id}">Avaa</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    </div>`;
+  $$('[data-open-opp]', wrap).forEach((btn) => btn.addEventListener('click', () => openOpportunityDrawer(btn.dataset.openOpp)));
+}
+
+function wirePipelineCardOpen(board) {
+  $$('.opp-card', board).forEach((card) => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('[data-no-open]')) return;
+      openOpportunityDrawer(card.dataset.oppId);
     });
   });
-  $$('.kc-value-input', board).forEach((input) => {
-    // Estetään kortin raahaus kun käyttäjä muokkaa kenttää (input on
-    // draggable="false", mutta klikkaus/kirjoitus pitää silti pysäyttää
-    // ettei kortin oma dragstart-kuuntelija häiritse tekstivalintaa).
-    input.addEventListener('mousedown', (e) => e.stopPropagation());
-    input.addEventListener('click', (e) => e.stopPropagation());
-    const save = async () => {
-      const prev = input.dataset.prevValue;
-      const raw = input.value.trim();
-      const next = raw === '' ? null : Number(raw);
-      if (String(next ?? '') === String(prev ?? '')) return; // ei muutosta
-      // Kirjoitus companies-tauluun laukaisee audit_log-triggerin automaattisesti.
-      const { error: updErr } = await supabase
-        .from('companies')
-        .update({ estimated_value: next })
-        .eq('id', input.dataset.companyId);
-      if (updErr) {
-        alert(`Arvon tallennus epäonnistui: ${updErr.message}`);
-        input.value = prev;
-        return;
-      }
-      input.dataset.prevValue = next ?? '';
-    };
-    input.addEventListener('blur', save);
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') input.blur();
-      if (e.key === 'Escape') { input.value = input.dataset.prevValue; input.blur(); }
+}
+
+function wirePipelineDragDrop(board) {
+  $$('.opp-card', board).forEach((card) => {
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', card.dataset.oppId);
+      card.classList.add('dragging');
     });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
   });
   $$('.kanban-col', board).forEach((col) => {
     col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drag-over'); });
@@ -797,17 +970,353 @@ async function loadPipeline() {
     col.addEventListener('drop', async (e) => {
       e.preventDefault();
       col.classList.remove('drag-over');
-      const companyId = e.dataTransfer.getData('text/plain');
-      const newStatusId = col.dataset.statusId;
-      // Kirjoitus companies-tauluun laukaisee automaattisesti audit_log-triggerin
-      // (trg_audit_companies) — statusmuutos kirjataan siis aina, ei vain UI:ssa.
-      const { error: updErr } = await supabase.from('companies').update({ status_id: newStatusId }).eq('id', companyId);
-      if (updErr) {
-        alert(`Tilan vaihto epäonnistui: ${updErr.message}`);
-        return;
+      const oppId = e.dataTransfer.getData('text/plain');
+      const targetStage = stageById(col.dataset.stageId);
+      const opp = opportunitiesCache.find((o) => o.id === oppId);
+      if (!opp || !targetStage || opp.stage_id === targetStage.id) return;
+
+      if (STAGE_TRANSITION_FORMS.has(targetStage.key)) {
+        openStageTransitionModal(opp, targetStage);
+        return; // ei muuteta mitään ennen kuin lomake tallennetaan - kortti pysyy vanhassa sarakkeessa
       }
-      await loadPipeline();
+      await moveOpportunityToStage(opp, targetStage, {});
     });
+  });
+}
+
+// Siirtää mahdollisuuden uuteen vaiheeseen. extraFields yhdistetään samaan
+// UPDATE-kutsuun (esim. lost_reason) jotta koko siirto on yksi atominen
+// tietokantaoperaatio. Epäonnistunut päivitys EI muuta paikallista tilaa,
+// joten kortti palautuu vanhaan sarakkeeseen automaattisesti seuraavassa
+// renderissä (spesifikaation kohta 17).
+async function moveOpportunityToStage(opp, targetStage, extraFields) {
+  const payload = {
+    stage_id: targetStage.id,
+    ...(opp.probability_overridden ? {} : { probability: targetStage.default_probability }),
+    ...extraFields
+  };
+  const { error } = await supabase.from('opportunities').update(payload).eq('id', opp.id);
+  if (error) {
+    alert(`Vaiheen vaihto epäonnistui: ${error.message}. Kauppa pysyy alkuperäisessä vaiheessa.`);
+    return false;
+  }
+  await loadPipeline();
+  return true;
+}
+
+function wirePipelineChrome() {
+  $('#newOpportunityBtn').addEventListener('click', () => openNewOpportunityModal());
+  $('#pipelineOnlyMine').addEventListener('change', (e) => { pipelineOnlyMine = e.target.checked; renderPipeline(); });
+  $$('.view-toggle-btn', $('#pipelineViewToggle')).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      pipelineViewMode = btn.dataset.mode;
+      localStorage.setItem('aerwork_pipeline_view_mode', pipelineViewMode);
+      $$('.view-toggle-btn', $('#pipelineViewToggle')).forEach((b) => {
+        b.classList.toggle('active', b === btn);
+        b.setAttribute('aria-pressed', String(b === btn));
+      });
+      renderPipeline();
+    });
+  });
+  $('#opportunityDrawerClose').addEventListener('click', closeOpportunityDrawer);
+  $('#opportunityDrawerOverlay').addEventListener('click', closeOpportunityDrawer);
+}
+
+function closeOpportunityDrawer() {
+  $('#opportunityDrawer').classList.add('hidden');
+  $('#opportunityDrawerOverlay').classList.add('hidden');
+}
+
+// ---------------------------------------------------------------
+// Uusi mahdollisuus
+// ---------------------------------------------------------------
+
+async function openNewOpportunityModal(preselectCompanyId) {
+  const { data: companies } = await supabase.from('companies').select('id, name').is('archived_at', null).order('name');
+  const body = $('#genericModalBody');
+  body.innerHTML = `
+    <h3>Uusi mahdollisuus</h3>
+    <form id="newOppForm" class="form-grid">
+      <label class="full">Yritys *
+        <select name="company_id" required>
+          <option value="">Valitse yritys…</option>
+          ${(companies || []).map((c) => `<option value="${c.id}" ${c.id === preselectCompanyId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Tuote
+        <select name="product_id"><option value="">Ei valittu</option>${productsCache.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}</select>
+      </label>
+      <label>Arvioitu arvo (€)<input type="number" name="estimated_value" min="0" step="100" /></label>
+      <label>Vastuuhenkilö
+        <select name="responsible_user_id">${orgProfilesCache.map((p) => `<option value="${p.id}" ${p.id === profile.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+      </label>
+      <label>Liidin lähde<input name="lead_source" /></label>
+      <label class="full">Vapaaehtoinen kuvaus (jos yrityksellä useita mahdollisuuksia)<input name="title" placeholder="esim. Kevät-Pay laajennus" /></label>
+      <div class="form-actions full">
+        <button type="button" class="btn-ghost" data-close-modal>Peruuta</button>
+        <button type="submit" class="btn-primary">Luo mahdollisuus</button>
+      </div>
+    </form>`;
+  $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+
+  $('#newOppForm', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    if (!payload.company_id) return;
+    const newLeadStage = pipelineStages.find((s) => s.key === 'new_lead');
+    const { data: companyRow } = await supabase.from('companies').select('owning_partner_id').eq('id', payload.company_id).single();
+
+    const { error } = await supabase.from('opportunities').insert({
+      company_id: payload.company_id,
+      partner_id: companyRow ? companyRow.owning_partner_id : profile.organization_id,
+      product_id: payload.product_id || null,
+      estimated_value: payload.estimated_value ? Number(payload.estimated_value) : null,
+      responsible_user_id: payload.responsible_user_id || profile.id,
+      lead_source: payload.lead_source || null,
+      title: payload.title || null,
+      stage_id: newLeadStage ? newLeadStage.id : null,
+      probability: newLeadStage ? newLeadStage.default_probability : 0,
+      created_by: profile.id
+    });
+    if (error) { alert(`Luonti epäonnistui: ${error.message}`); return; }
+    $('#genericModal').classList.add('hidden');
+    await loadPipeline();
+  });
+
+  $('#genericModal').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------
+// Vaiheen vaihdon lomakkeet (vain kevyt, vaiheen kannalta välttämätön tieto)
+// ---------------------------------------------------------------
+
+function openStageTransitionModal(opp, targetStage) {
+  const body = $('#genericModalBody');
+  const company = opp.companies || {};
+  const forms = {
+    meeting_demo: () => `
+      <h3>Siirto: ${escapeHtml(targetStage.label_fi)}</h3>
+      <p class="muted small">${escapeHtml(company.name)}</p>
+      <form id="stageForm" class="form-grid">
+        <label>Päivämäärä *<input required type="date" name="meeting_date" min="${todayISO()}" /></label>
+        <label>Kellonaika<input type="time" name="meeting_time" /></label>
+        <label class="full">Osallistujat<input name="participants" placeholder="esim. Matti Meikäläinen, Liisa Virtanen" /></label>
+        <label class="full">Tavoite<input name="objective" placeholder="esim. Tarpeen kartoitus" /></label>
+        <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Vahvista siirto</button></div>
+      </form>`,
+    offer: () => `
+      <h3>Siirto: ${escapeHtml(targetStage.label_fi)}</h3>
+      <p class="muted small">${escapeHtml(company.name)}</p>
+      <form id="stageForm" class="form-grid">
+        <label>Tarjouksen arvo (€) *<input required type="number" min="0" step="100" name="offer_value" value="${opp.estimated_value ?? ''}" /></label>
+        <label>Tuote<select name="product_id"><option value="">Ei valittu</option>${productsCache.map((p) => `<option value="${p.id}" ${p.id === opp.product_id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select></label>
+        <label>Voimassaolo asti<input type="date" name="valid_until" /></label>
+        <label>Seuraava follow-up *<input required type="date" name="followup_date" min="${todayISO()}" /></label>
+        <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Vahvista siirto</button></div>
+      </form>`,
+    won: () => `
+      <h3>🎉 Siirto: Voitettu</h3>
+      <p class="muted small">${escapeHtml(company.name)}</p>
+      <form id="stageForm" class="form-grid">
+        <label>Lopullinen arvo (€) *<input required type="number" min="0" step="100" name="final_value" value="${opp.estimated_value ?? ''}" /></label>
+        <label>Kuukausihinta (MRR, €) *<input required type="number" min="0" step="10" name="monthly_price" /></label>
+        <label>Tuote *<select required name="product_id">${productsCache.map((p) => `<option value="${p.id}" ${p.id === opp.product_id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select></label>
+        <label>Sopimuksen alkamispäivä *<input required type="date" name="contract_start_date" value="${todayISO()}" /></label>
+        <label>Kesto (kk) *<input required type="number" min="1" name="length_months" value="12" /></label>
+        <label>Laskutusväli<select name="billing_interval"><option value="monthly">Kuukausittain</option><option value="quarterly">Neljännesvuosittain</option><option value="yearly">Vuosittain</option></select></label>
+        <label>Käyttöönottovastuuhenkilö<select name="onboarding_owner_id">${orgProfilesCache.map((p) => `<option value="${p.id}" ${p.id === opp.responsible_user_id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select></label>
+        <p class="muted small full">Partnerikomissio lasketaan automaattisesti komissiosäännöistä sopimuksen tallennuksen yhteydessä.</p>
+        <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Merkitse voitetuksi</button></div>
+      </form>`,
+    lost: () => `
+      <h3>Siirto: Hävitty</h3>
+      <p class="muted small">${escapeHtml(company.name)}</p>
+      <form id="stageForm" class="form-grid">
+        <label class="full">Häviämisen syy *<input required name="lost_reason" /></label>
+        <label>Kilpailija (jos tiedossa)<input name="lost_competitor" /></label>
+        <label class="full">Asiakkaan palaute<textarea name="feedback" rows="2"></textarea></label>
+        <label class="checkbox-inline full"><input type="checkbox" name="can_revisit" /> Asiakkaaseen voi palata myöhemmin</label>
+        <label>Uusi yhteydenottopäivä<input type="date" name="revisit_date" /></label>
+        <div class="form-actions full"><button type="button" class="btn-ghost" data-close-modal>Peruuta</button><button type="submit" class="btn-primary">Merkitse hävityksi</button></div>
+      </form>`
+  };
+
+  body.innerHTML = forms[targetStage.key]();
+  $$('[data-close-modal]', body).forEach((b) => b.addEventListener('click', () => $('#genericModal').classList.add('hidden')));
+
+  $('#stageForm', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const v = Object.fromEntries(fd.entries());
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+
+    try {
+      if (targetStage.key === 'meeting_demo') {
+        await supabase.from('activities').insert({
+          company_id: opp.company_id, partner_id: opp.partner_id, performed_by: profile.id,
+          channel: 'meeting', purpose: v.objective || 'Tapaaminen sovittu',
+          summary: `Osallistujat: ${v.participants || '—'}`,
+          next_followup_date: v.meeting_date, followup_owner_id: opp.responsible_user_id || profile.id
+        });
+        await moveOpportunityToStage(opp, targetStage, {});
+      } else if (targetStage.key === 'offer') {
+        await supabase.from('activities').insert({
+          company_id: opp.company_id, partner_id: opp.partner_id, performed_by: profile.id,
+          channel: 'email', purpose: 'Tarjous lähetetty', outcome: `Arvo ${v.offer_value} €`,
+          next_followup_date: v.followup_date, followup_owner_id: opp.responsible_user_id || profile.id
+        });
+        await supabase.from('followup_tasks').insert({
+          company_id: opp.company_id, partner_id: opp.partner_id, owner_id: opp.responsible_user_id || profile.id,
+          due_date: v.followup_date, description: 'Tarjouksen follow-up', opportunity_id: opp.id, created_by: profile.id
+        });
+        await moveOpportunityToStage(opp, targetStage, {
+          estimated_value: Number(v.offer_value), product_id: v.product_id || opp.product_id,
+          expected_close_date: v.valid_until || opp.expected_close_date
+        });
+      } else if (targetStage.key === 'won') {
+        const start = v.contract_start_date;
+        const end = new Date(start);
+        end.setMonth(end.getMonth() + Number(v.length_months || 0));
+        const { data: signedStatus } = await supabase.from('deal_statuses').select('id').eq('key', 'signed').maybeSingle();
+        const { data: deal, error: dealErr } = await supabase.from('deals').insert({
+          company_id: opp.company_id, partner_id: opp.partner_id, responsible_user_id: v.onboarding_owner_id || opp.responsible_user_id,
+          contract_signed_date: todayISO(), contract_start_date: start, contract_end_date: end.toISOString().slice(0, 10),
+          billing_interval: v.billing_interval, currency: opp.currency || 'EUR',
+          status_id: signedStatus ? signedStatus.id : null, created_by: profile.id
+        }).select().single();
+        if (dealErr) throw dealErr;
+        await supabase.from('deal_line_items').insert({
+          deal_id: deal.id, product_id: v.product_id, quantity: 1, monthly_price: Number(v.monthly_price)
+        });
+        const ok = await moveOpportunityToStage(opp, targetStage, {
+          estimated_value: Number(v.final_value), product_id: v.product_id, won_deal_id: deal.id,
+          probability: targetStage.default_probability // voitto pakottaa aina 100%, ohittaa käsin-muutetun lipun
+        });
+        if (!ok) return;
+      } else if (targetStage.key === 'lost') {
+        await moveOpportunityToStage(opp, targetStage, {
+          lost_reason: v.lost_reason, lost_competitor: v.lost_competitor || null,
+          lost_can_revisit: !!v.can_revisit, lost_revisit_date: v.revisit_date || null,
+          probability: targetStage.default_probability, // häviö pakottaa aina 0%, ohittaa käsin-muutetun lipun
+          notes: [opp.notes, v.feedback ? `Asiakkaan palaute: ${v.feedback}` : null].filter(Boolean).join('\n')
+        });
+      }
+      $('#genericModal').classList.add('hidden');
+    } catch (err) {
+      alert(`Tallennus epäonnistui: ${err.message || err}. Kauppa pysyy alkuperäisessä vaiheessa.`);
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  $('#genericModal').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------
+// Mahdollisuuden sivupaneeli
+// ---------------------------------------------------------------
+
+async function openOpportunityDrawer(oppId) {
+  const opp = opportunitiesCache.find((o) => o.id === oppId);
+  if (!opp) return;
+  const stage = stageById(opp.stage_id);
+  const company = opp.companies || {};
+
+  $('#oppDrawerTitle').textContent = company.name || 'Mahdollisuus';
+  const body = $('#opportunityDrawerBody');
+  body.innerHTML = '<p class="muted">Ladataan…</p>';
+  $('#opportunityDrawer').classList.remove('hidden');
+  $('#opportunityDrawerOverlay').classList.remove('hidden');
+
+  const [{ data: activities }, { data: followups }, { data: siblingOpps }] = await Promise.all([
+    supabase.from('activities').select('*').eq('company_id', opp.company_id).order('occurred_at', { ascending: false }).limit(8),
+    supabase.from('followup_tasks').select('*').eq('opportunity_id', opp.id).eq('status', 'open').order('due_date'),
+    supabase.from('opportunities').select('id, title, estimated_value, stage_id').eq('company_id', opp.company_id).neq('id', opp.id).is('archived_at', null)
+  ]);
+
+  const otherOpps = siblingOpps || [];
+
+  body.innerHTML = `
+    <div class="opp-drawer-section">
+      <div class="opp-prob-row" title="Todennäköisyys"><div class="opp-prob-bar"><div class="opp-prob-fill" style="width:${opp.probability}%"></div></div><span class="opp-prob-pct">${opp.probability}%</span></div>
+      <table class="detail-table">
+        <tr><td>Vaihe</td><td>${stage ? escapeHtml(stage.label_fi) : '—'}</td></tr>
+        <tr><td>Yhteyshenkilö</td><td>${escapeHtml(company.contact_name || '—')}${company.contact_title ? ' · ' + escapeHtml(company.contact_title) : ''}</td></tr>
+        <tr><td>Tuote</td><td>${escapeHtml(opp.products ? opp.products.name : (opp.title || '—'))}</td></tr>
+        <tr><td>Arvo</td><td>${money(opp.estimated_value, opp.currency)}</td></tr>
+        <tr><td>Vastuuhenkilö</td><td>
+          <select id="oppRespSelect">${orgProfilesCache.map((p) => `<option value="${p.id}" ${p.id === opp.responsible_user_id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+        </td></tr>
+        <tr><td>Todennäköisyys</td><td><input id="oppProbInput" type="number" min="0" max="100" value="${opp.probability}" style="width:70px;" /> %</td></tr>
+        <tr><td>Liidin lähde</td><td>${escapeHtml(opp.lead_source || '—')}</td></tr>
+        <tr><td>Arvioitu päätöspäivä</td><td>${opp.expected_close_date ? fmtDate(opp.expected_close_date) : '—'}</td></tr>
+      </table>
+      <button class="btn-primary small" id="openCompanyFromDrawer">Avaa yritys</button>
+    </div>
+
+    ${otherOpps.length ? `
+    <div class="opp-drawer-section">
+      <h4>Muut tämän yrityksen mahdollisuudet (${otherOpps.length})</h4>
+      <ul class="muted small">${otherOpps.map((o) => `<li>${escapeHtml(o.title || 'Mahdollisuus')} — ${money(o.estimated_value)}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    <div class="opp-drawer-section">
+      <h4>Avoimet follow-upit</h4>
+      ${(followups || []).length ? `<ul>${followups.map((f) => `<li>${fmtDate(f.due_date)} — ${escapeHtml(f.description || '')}</li>`).join('')}</ul>` : '<p class="muted small">Ei avoimia follow-upeja.</p>'}
+      <form id="drawerFollowupForm" class="form-grid">
+        <label>Uusi follow-up<input type="date" name="due_date" required min="${todayISO()}" /></label>
+        <label class="full">Kuvaus<input name="description" /></label>
+        <button type="submit" class="btn-ghost small">Lisää follow-up</button>
+      </form>
+    </div>
+
+    <div class="opp-drawer-section">
+      <h4>Yrityksen viimeisimmät aktiviteetit</h4>
+      ${(activities || []).length ? `<ul>${(activities || []).map((a) => `<li><strong>${escapeHtml(a.channel)}</strong> · ${fmtDate(a.occurred_at)} — ${escapeHtml(a.purpose || a.summary || '')}</li>`).join('')}</ul>` : '<p class="muted small">Ei vielä aktiviteetteja.</p>'}
+      <form id="drawerActivityForm" class="form-grid">
+        <label>Tyyppi<select name="channel"><option value="call">Puhelu</option><option value="email">Sähköposti</option><option value="linkedin">LinkedIn</option><option value="whatsapp">WhatsApp</option><option value="meeting">Tapaaminen</option><option value="other">Muu</option></select></label>
+        <label class="full">Muistiinpano<input name="summary" /></label>
+        <button type="submit" class="btn-ghost small">Kirjaa aktiviteetti</button>
+      </form>
+    </div>`;
+
+  $('#openCompanyFromDrawer', body).addEventListener('click', () => { closeOpportunityDrawer(); openCompanyModal(opp.company_id); });
+
+  $('#oppRespSelect', body).addEventListener('change', async (e) => {
+    const { error: e1 } = await supabase.from('opportunities').update({ responsible_user_id: e.target.value }).eq('id', opp.id);
+    if (e1) { alert(`Vastuuhenkilön vaihto epäonnistui: ${e1.message}`); return; }
+    await loadPipeline();
+  });
+  $('#oppProbInput', body).addEventListener('change', async (e) => {
+    const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+    const { error: e2 } = await supabase.from('opportunities').update({ probability: val, probability_overridden: true }).eq('id', opp.id);
+    if (e2) { alert(`Todennäköisyyden muutos epäonnistui: ${e2.message}`); return; }
+    await loadPipeline();
+  });
+
+  $('#drawerFollowupForm', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const { error: e3 } = await supabase.from('followup_tasks').insert({
+      company_id: opp.company_id, partner_id: opp.partner_id, owner_id: opp.responsible_user_id || profile.id,
+      due_date: fd.get('due_date'), description: fd.get('description') || null, opportunity_id: opp.id, created_by: profile.id
+    });
+    if (e3) { alert(`Follow-upin lisäys epäonnistui: ${e3.message}`); return; }
+    await loadPipeline();
+    openOpportunityDrawer(opp.id);
+  });
+
+  $('#drawerActivityForm', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const { error: e4 } = await supabase.from('activities').insert({
+      company_id: opp.company_id, partner_id: opp.partner_id, performed_by: profile.id,
+      channel: fd.get('channel'), summary: fd.get('summary') || null
+    });
+    if (e4) { alert(`Aktiviteetin kirjaus epäonnistui: ${e4.message}`); return; }
+    openOpportunityDrawer(opp.id);
   });
 }
 
