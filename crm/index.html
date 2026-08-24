@@ -126,35 +126,71 @@
     </section>
 
     <section id="view-owner-search" class="view">
-      <h2>Company Search</h2>
-      <p class="muted small">Hae suomalaisia yrityksiä PRH/YTJ-rekisteristä. Tulokset merkitään aina lähteellä ja tarkistuspäivällä.</p>
-      <div class="filters">
-        <input type="search" id="ownerSearchName" placeholder="Yrityksen nimi…" />
-        <input type="text" id="ownerSearchBusinessId" placeholder="Y-tunnus (valinnainen)…" />
-        <button class="btn-primary" id="ownerSearchBtn">Hae PRH/YTJ:stä</button>
+      <div class="search-page-head">
+        <h2>Company Search</h2>
+        <p class="muted small">Etsi ja arvioi suomalaisia yrityksiä myyntimahdollisuuksia varten. Hae nimellä tai Y-tunnuksella — tunnistetaan automaattisesti.</p>
       </div>
-      <div class="filters" id="ownerSearchRefineBar" style="display:none;">
-        <select id="ownerSearchCrmFilter">
-          <option value="">Kaikki (jo CRM:ssä / ei)</option>
-          <option value="in_crm">Jo CRM:ssä</option>
-          <option value="not_in_crm">Ei vielä CRM:ssä</option>
-        </select>
-        <select id="ownerSearchDmFilter">
-          <option value="">Päättäjä: kaikki</option>
-          <option value="found">Päättäjä löydetty</option>
-          <option value="not_found">Päättäjää ei löydetty</option>
-        </select>
-        <select id="ownerSearchSort">
-          <option value="default">Järjestys: PRH-oletus</option>
-          <option value="dm_first">Päättäjä löydetty ensin</option>
-          <option value="newest_registration">Uusin rekisteröinti ensin</option>
-        </select>
-        <span class="muted small" title="Liikevaihto- ja kasvuperusteinen lajittelu vaatii maksullisen taloustietolähteen, ei vielä käytössä">
-          Liikevaihto/kasvu-lajittelu: vaatii integraation 🔒
-        </span>
+
+      <div class="search-bar-row">
+        <div class="search-input-wrap">
+          <span class="search-input-icon" aria-hidden="true">🔍</span>
+          <input type="search" id="ownerSearchInput" placeholder="Hae nimellä tai Y-tunnuksella (esim. 1234567-8)…" />
+        </div>
+        <button class="btn-primary" id="ownerSearchBtn">Hae</button>
+        <button class="btn-ghost" id="ownerAdvancedFiltersBtn">Advanced Filters</button>
+        <button class="btn-ghost" id="ownerSavedSearchesBtn">Saved Searches</button>
       </div>
+
+      <div class="search-meta-row hidden" id="ownerSearchMetaRow">
+        <span id="ownerSearchResultCount" class="muted small"></span>
+        <div class="chip-row" id="ownerSearchChips"></div>
+        <button class="btn-text hidden" id="ownerClearFiltersBtn">Tyhjennä suodattimet</button>
+        <div class="view-toggle" id="ownerSearchViewToggle" role="group" aria-label="Näkymän vaihto">
+          <button type="button" data-mode="cards" class="view-toggle-btn active" aria-pressed="true">⊞ Kortit</button>
+          <button type="button" data-mode="table" class="view-toggle-btn" aria-pressed="false">☰ Taulukko</button>
+        </div>
+      </div>
+
       <div id="ownerSearchResults" class="company-list"></div>
     </section>
+
+    <!-- Advanced Filters -drawer (avataan JS:llä, sama drawer-komponentti kuin mobiilinavigaatiossa) -->
+    <div class="drawer-overlay hidden" id="ownerFiltersDrawerOverlay"></div>
+    <div class="drawer hidden" id="ownerFiltersDrawer" role="dialog" aria-label="Lisäsuodattimet">
+      <div class="view-head">
+        <h3 style="margin:0;">Advanced Filters</h3>
+        <button class="modal-close" id="ownerFiltersDrawerClose" style="position:static;" aria-label="Sulje">×</button>
+      </div>
+      <div class="drawer-filter-grid">
+        <label>Kaupunki<input type="text" id="fCity" placeholder="esim. Helsinki" /></label>
+        <label>Toimiala sisältää<input type="text" id="fIndustry" placeholder="esim. hoiva" /></label>
+        <label>CRM-status
+          <select id="fCrm">
+            <option value="">Kaikki</option>
+            <option value="in_crm">Jo CRM:ssä</option>
+            <option value="not_in_crm">Ei vielä CRM:ssä</option>
+          </select>
+        </label>
+        <label>Päättäjä
+          <select id="fDm">
+            <option value="">Kaikki</option>
+            <option value="found">Löydetty</option>
+            <option value="not_found">Ei löydetty</option>
+          </select>
+        </label>
+        <label>Järjestys
+          <select id="fSort">
+            <option value="default">PRH-oletus</option>
+            <option value="dm_first">Päättäjä löydetty ensin</option>
+            <option value="newest_registration">Uusin rekisteröinti ensin</option>
+          </select>
+        </label>
+        <p class="muted small" style="grid-column:1/-1;">🔒 Liikevaihto-, kasvu- ja henkilöstömäärä­suodattimet vaativat maksullisen taloustietolähteen — ei vielä käytössä, ei näytetty näennäisesti toimivana.</p>
+      </div>
+      <div class="form-actions">
+        <button class="btn-ghost" id="ownerFiltersDrawerApply">Näytä tulokset</button>
+      </div>
+    </div>
 
     <section id="view-owner-decision-makers" class="view">
       <h2>Decision Makers</h2>
