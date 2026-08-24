@@ -43,7 +43,7 @@ comment on table profiles is 'Käyttäjän rooli + organisaatio. Luodaan aina au
 -- Helper-funktiot RLS-policyihin. SECURITY DEFINER + kiinteä search_path,
 -- jotta ne voivat lukea profiles-taulua turvallisesti ilman rekursiivista
 -- RLS-tarkistusta ja ilman search_path-hyväksikäyttöä.
-create or replace function public.current_role() returns text
+create or replace function public.app_current_role() returns text
 language sql stable security definer set search_path = public as $$
   select role from profiles where id = auth.uid();
 $$;
@@ -242,7 +242,7 @@ create policy companies_select on companies for select
     or (
       owning_partner_id = current_org_id()
       and (
-        current_role() in ('partner_admin', 'read_only')
+        app_current_role() in ('partner_admin', 'read_only')
         or not restricted_visibility
         or responsible_user_id = auth.uid()
       )
@@ -252,13 +252,13 @@ create policy companies_select on companies for select
 create policy companies_insert on companies for insert
   with check (
     is_super_admin()
-    or (owning_partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user'))
+    or (owning_partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user'))
   );
 
 create policy companies_update on companies for update
   using (
     is_super_admin()
-    or (owning_partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user'))
+    or (owning_partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user'))
   )
   with check (
     is_super_admin()
@@ -273,20 +273,20 @@ create policy contacts_select on contacts for select
       select 1 from companies c where c.id = contacts.company_id
       and (
         c.owning_partner_id = current_org_id()
-        and (current_role() in ('partner_admin', 'read_only') or not c.restricted_visibility or c.responsible_user_id = auth.uid())
+        and (app_current_role() in ('partner_admin', 'read_only') or not c.restricted_visibility or c.responsible_user_id = auth.uid())
       )
     )
   );
 create policy contacts_write on contacts for insert with check (
   is_super_admin() or exists (
     select 1 from companies c where c.id = contacts.company_id
-    and c.owning_partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')
+    and c.owning_partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')
   )
 );
 create policy contacts_update on contacts for update using (
   is_super_admin() or exists (
     select 1 from companies c where c.id = contacts.company_id
-    and c.owning_partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')
+    and c.owning_partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')
   )
 );
 
@@ -326,9 +326,9 @@ alter table activities enable row level security;
 create policy activities_select on activities for select
   using (is_super_admin() or partner_id = current_org_id());
 create policy activities_insert on activities for insert
-  with check (is_super_admin() or (partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')));
+  with check (is_super_admin() or (partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')));
 create policy activities_update on activities for update
-  using (is_super_admin() or (partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')));
+  using (is_super_admin() or (partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')));
 
 -- Kun aktiviteetti kirjataan, päivitä yrityksen last_contacted_at/-by automaattisesti.
 create or replace function public.fn_touch_company_last_contact() returns trigger
@@ -372,9 +372,9 @@ alter table followup_tasks enable row level security;
 create policy followup_select on followup_tasks for select
   using (is_super_admin() or partner_id = current_org_id());
 create policy followup_insert on followup_tasks for insert
-  with check (is_super_admin() or (partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')));
+  with check (is_super_admin() or (partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')));
 create policy followup_update on followup_tasks for update
-  using (is_super_admin() or (partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')));
+  using (is_super_admin() or (partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')));
 
 -- Sääntö: "vaadi uuden follow-upin sopimista ennen kuin aktiivinen tehtävä
 -- suljetaan, jos myyntiprosessi jatkuu" — toteutettu sovellustasolla (UI pakottaa
@@ -484,16 +484,16 @@ alter table deal_line_items enable row level security;
 create policy deals_select on deals for select
   using (is_super_admin() or partner_id = current_org_id());
 create policy deals_insert on deals for insert
-  with check (is_super_admin() or (partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')));
+  with check (is_super_admin() or (partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')));
 create policy deals_update on deals for update
-  using (is_super_admin() or (partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')));
+  using (is_super_admin() or (partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')));
 
 create policy deal_line_items_select on deal_line_items for select
   using (is_super_admin() or exists (select 1 from deals d where d.id = deal_line_items.deal_id and d.partner_id = current_org_id()));
 create policy deal_line_items_write on deal_line_items for all
   using (is_super_admin() or exists (
     select 1 from deals d where d.id = deal_line_items.deal_id
-    and d.partner_id = current_org_id() and current_role() in ('partner_admin', 'partner_user')
+    and d.partner_id = current_org_id() and app_current_role() in ('partner_admin', 'partner_user')
   ));
 
 -- Laskenta: kesto kuukausina, MRR, ARR, kokonaisarvo ja partnerikomissio.
