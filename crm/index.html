@@ -138,6 +138,26 @@
         <input type="text" id="ownerSearchBusinessId" placeholder="Y-tunnus (valinnainen)…" />
         <button class="btn-primary" id="ownerSearchBtn">Hae PRH/YTJ:stä</button>
       </div>
+      <div class="filters" id="ownerSearchRefineBar" style="display:none;">
+        <select id="ownerSearchCrmFilter">
+          <option value="">Kaikki (jo CRM:ssä / ei)</option>
+          <option value="in_crm">Jo CRM:ssä</option>
+          <option value="not_in_crm">Ei vielä CRM:ssä</option>
+        </select>
+        <select id="ownerSearchDmFilter">
+          <option value="">Päättäjä: kaikki</option>
+          <option value="found">Päättäjä löydetty</option>
+          <option value="not_found">Päättäjää ei löydetty</option>
+        </select>
+        <select id="ownerSearchSort">
+          <option value="default">Järjestys: PRH-oletus</option>
+          <option value="dm_first">Päättäjä löydetty ensin</option>
+          <option value="newest_registration">Uusin rekisteröinti ensin</option>
+        </select>
+        <span class="muted small" title="Liikevaihto- ja kasvuperusteinen lajittelu vaatii maksullisen taloustietolähteen, ei vielä käytössä">
+          Liikevaihto/kasvu-lajittelu: vaatii integraation 🔒
+        </span>
+      </div>
       <div id="ownerSearchResults" class="company-list"></div>
     </section>
 

@@ -196,6 +196,9 @@ function wireModals() {
   $('#ownerJobRefreshBtn').addEventListener('click', loadOwnerJobs);
   $('#ownerJobStatusFilter').addEventListener('change', loadOwnerJobs);
   $('#ownerNewSavedSearchBtn').addEventListener('click', openSaveSearchModal);
+  $('#ownerSearchCrmFilter').addEventListener('change', renderOwnerSearchResults);
+  $('#ownerSearchDmFilter').addEventListener('change', renderOwnerSearchResults);
+  $('#ownerSearchSort').addEventListener('change', renderOwnerSearchResults);
 }
 
 function fillStatusFilter() {
@@ -807,10 +810,14 @@ async function loadOwnerOverview() {
 // Company Search (PRH/YTJ) + Lisää CRM:ään
 // ---------------------------------------------------------------
 
+let lastOwnerSearchResults = [];
+let lastOwnerSearchMeta = null;
+
 async function runOwnerCompanySearch() {
   const name = $('#ownerSearchName').value.trim();
   const businessId = $('#ownerSearchBusinessId').value.trim();
   const resultsEl = $('#ownerSearchResults');
+  $('#ownerSearchRefineBar').style.display = 'none';
 
   if (!name && !businessId) {
     resultsEl.innerHTML = '<p class="muted">Anna yrityksen nimi tai Y-tunnus.</p>';
@@ -839,24 +846,137 @@ async function runOwnerCompanySearch() {
     return;
   }
 
-  resultsEl.innerHTML = result.results.map((r, idx) => `
-    <div class="company-card" data-idx="${idx}" style="cursor:default;">
-      <div class="cc-main">
-        <div class="cc-name">${escapeHtml(r.name || '(nimi tuntematon)')}</div>
-        <div class="cc-sub">Y-tunnus: ${escapeHtml(r.business_id || '—')} · ${escapeHtml(r.company_form || '')} · rekisteröity ${fmtDate(r.registration_date)}</div>
-        <div class="muted small">Lähde: virallinen rekisteri (PRH/YTJ) · haettu ${fmtDateTime(result.fetched_at)}</div>
-      </div>
-      <div class="cc-meta">
-        <button class="btn-primary small" data-action="add-to-crm" data-idx="${idx}">Lisää CRM:ään</button>
-      </div>
-    </div>`).join('');
+  lastOwnerSearchResults = result.results;
+  lastOwnerSearchMeta = result;
+  $('#ownerSearchRefineBar').style.display = '';
+  renderOwnerSearchResults();
+}
 
+function renderOwnerSearchResults() {
+  const resultsEl = $('#ownerSearchResults');
+  if (!lastOwnerSearchResults.length) return;
+
+  const crmFilter = $('#ownerSearchCrmFilter').value;
+  const dmFilter = $('#ownerSearchDmFilter').value;
+  const sort = $('#ownerSearchSort').value;
+
+  let rows = lastOwnerSearchResults.filter((r) => {
+    if (crmFilter === 'in_crm' && !r.in_crm) return false;
+    if (crmFilter === 'not_in_crm' && r.in_crm) return false;
+    if (dmFilter === 'found' && !r.decision_maker) return false;
+    if (dmFilter === 'not_found' && r.decision_maker) return false;
+    return true;
+  });
+
+  if (sort === 'dm_first') {
+    rows = [...rows].sort((a, b) => (b.decision_maker ? 1 : 0) - (a.decision_maker ? 1 : 0));
+  } else if (sort === 'newest_registration') {
+    rows = [...rows].sort((a, b) => new Date(b.registration_date || 0) - new Date(a.registration_date || 0));
+  }
+
+  if (!rows.length) {
+    resultsEl.innerHTML = '<p class="muted">Ei tuloksia näillä suodattimilla.</p>';
+    return;
+  }
+
+  resultsEl.innerHTML = rows.map((r) => searchCardHtml(r)).join('');
+  wireSearchCardActions(resultsEl);
+}
+
+function searchCardHtml(r) {
+  const idx = lastOwnerSearchResults.indexOf(r);
+  const address = (r.addresses || [])[0] || {};
+  const city = address.postOffices && address.postOffices[0] ? address.postOffices[0].city : null;
+  const dm = r.decision_maker;
+
+  return `
+    <div class="search-card" data-idx="${idx}">
+      <div class="cc-name">${escapeHtml(r.name || '(nimi tuntematon)')} ${r.in_crm ? '<span class="status-pill won">Jo CRM:ssä</span>' : ''}</div>
+      <div class="search-card-grid">
+        <div class="search-card-section">
+          <h5>Yrityksen perustiedot</h5>
+          <div>Y-tunnus: ${escapeHtml(r.business_id || '—')}</div>
+          <div>${escapeHtml(r.company_form || '—')}</div>
+          <div>Rekisteröity: ${fmtDate(r.registration_date)}</div>
+          <div>${escapeHtml(city || 'Kaupunki tuntematon')}</div>
+          <div>${escapeHtml(r.main_business_line || 'Toimiala tuntematon')}</div>
+          <div class="muted small" style="margin-top:6px;">Lähde: virallinen rekisteri (PRH/YTJ)<br/>Tarkistettu: ${fmtDateTime(lastOwnerSearchMeta.fetched_at)}</div>
+        </div>
+        <div class="search-card-section">
+          <h5>Talous ja kasvu</h5>
+          <div>Liikevaihto: <span class="muted">Ei saatavilla</span></div>
+          <div>Kasvun suunta: <span class="growth-unknown">Ei tietoa</span></div>
+          <div>Henkilöstömäärä: <span class="muted">Ei saatavilla</span></div>
+          <div class="muted small" style="margin-top:6px;">🔒 Vaatii maksullisen taloustietolähteen (ei vielä käytössä) - ei arvattu.</div>
+        </div>
+        <div class="search-card-section">
+          <h5>Päättäjä</h5>
+          ${dm ? `
+            <div><strong>${escapeHtml(dm.name)}</strong>${dm.title ? `, ${escapeHtml(dm.title)}` : ''}</div>
+            <div class="muted small">
+              ${dm.source_url ? `<a href="${escapeHtml(dm.source_url)}" target="_blank" rel="noopener">Lähde ↗</a> · ` : ''}
+              ${dm.review_status === 'approved' ? 'Hyväksytty' : dm.review_status === 'rejected' ? 'Hylätty' : 'Vahvistamaton'}
+            </div>
+            <div class="muted small">Lähde: ${escapeHtml(dm.source)} (${dm.confidence}) · tarkistettu ${fmtDate(dm.found_at)}</div>
+          ` : '<div class="muted">Päättäjää ei ole vielä löydetty</div>'}
+        </div>
+      </div>
+      <div class="search-card-actions">
+        ${r.in_crm
+          ? `<button class="btn-primary small" data-action="open-crm" data-idx="${idx}">Avaa CRM:ssä</button>`
+          : `<button class="btn-primary small" data-action="add-to-crm" data-idx="${idx}">Lisää CRM:ään</button>`}
+        <button class="btn-ghost small" data-action="find-dm" data-idx="${idx}">${r.in_crm ? 'Etsi päättäjä' : 'Lisää CRM:ään ja etsi päättäjä'}</button>
+      </div>
+    </div>`;
+}
+
+function wireSearchCardActions(resultsEl) {
   $$('[data-action="add-to-crm"]', resultsEl).forEach((btn) => {
-    btn.addEventListener('click', () => addExternalResultToCrm(result.results[Number(btn.dataset.idx)]));
+    btn.addEventListener('click', () => addExternalResultToCrm(lastOwnerSearchResults[Number(btn.dataset.idx)]));
+  });
+  $$('[data-action="open-crm"]', resultsEl).forEach((btn) => {
+    btn.addEventListener('click', () => openCompanyModal(lastOwnerSearchResults[Number(btn.dataset.idx)].existing_company_id));
+  });
+  $$('[data-action="find-dm"]', resultsEl).forEach((btn) => {
+    btn.addEventListener('click', () => findDecisionMakerForSearchResult(Number(btn.dataset.idx), btn));
   });
 }
 
-async function addExternalResultToCrm(record) {
+async function findDecisionMakerForSearchResult(idx, btn) {
+  const record = lastOwnerSearchResults[idx];
+  let companyId = record.existing_company_id;
+
+  if (!companyId) {
+    // "Lisää CRM:ään ja etsi päättäjä" - lisätään ensin (duplikaattitarkistuksella).
+    companyId = await addExternalResultToCrm(record, { skipOpen: true });
+    if (!companyId) return;
+    record.existing_company_id = companyId;
+    record.in_crm = true;
+  }
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Etsitään…';
+  try {
+    const resp = await fetch('/.netlify/functions/owner-find-decision-maker', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ company_id: companyId, company_name: record.name })
+    });
+    const result = await resp.json();
+    if (!resp.ok) { alert(`Haku epäonnistui: ${result.error}`); return; }
+    if (!result.found) { alert(`Päättäjää ei löytynyt: ${result.reasoning || 'ei riittävän luotettavaa tietoa.'}`); return; }
+    record.decision_maker = result.decision_maker;
+    renderOwnerSearchResults();
+  } catch (err) {
+    alert(`Haku epäonnistui: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+async function addExternalResultToCrm(record, opts = {}) {
   const address = (record.addresses || [])[0] || {};
 
   // Duplikaattitarkistus AINA ennen lisäystä (kohta 10) - uudelleenkäyttää samaa
@@ -871,7 +991,7 @@ async function addExternalResultToCrm(record) {
       `Yritystä ei lisätä uudelleen. Avataanko olemassa oleva yritys?`
     );
     if (proceed && dup.company_id) await openCompanyModal(dup.company_id);
-    return;
+    return null;
   }
 
   const { data: newCompany, error } = await supabase.from('companies').insert({
@@ -889,7 +1009,7 @@ async function addExternalResultToCrm(record) {
 
   if (error) {
     alert(`Lisäys epäonnistui: ${error.message}`);
-    return;
+    return null;
   }
 
   // Säilytetään alkuperäinen lähdetieto pysyvästi, ei koskaan ylikirjoiteta.
@@ -905,8 +1025,11 @@ async function addExternalResultToCrm(record) {
     created_by: profile.id
   });
 
-  alert(`"${record.name}" lisätty CRM:ään.`);
-  await openCompanyModal(newCompany.id);
+  if (!opts.skipOpen) {
+    alert(`"${record.name}" lisätty CRM:ään.`);
+    await openCompanyModal(newCompany.id);
+  }
+  return newCompany.id;
 }
 
 // ---------------------------------------------------------------
