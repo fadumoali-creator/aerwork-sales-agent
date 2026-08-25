@@ -73,7 +73,8 @@ textarea:focus-visible, [tabindex]:focus-visible{
   background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-lg);
   padding:var(--space-6) var(--space-5); width:100%; max-width:360px; box-shadow:var(--shadow-elevated);
 }
-.login-logo{color:var(--teal); font-weight:800; letter-spacing:.08em; font-size:var(--text-sm); text-transform:uppercase; margin-bottom:var(--space-2);}
+.login-logo{margin-bottom:var(--space-3);}
+.login-logo img{height:32px; width:auto; display:block;}
 .login-card h1{margin:0 0 4px; font-size:var(--text-lg); color:var(--navy);}
 .muted{color:var(--muted);}
 .muted.small{font-size:var(--text-sm);}
@@ -218,9 +219,9 @@ textarea:focus-visible, [tabindex]:focus-visible{
 }
 .brand{display:flex; align-items:center; gap:10px;}
 .avatar-badge{
-  width:36px; height:36px; border-radius:var(--radius-md); background:linear-gradient(135deg,var(--teal-600),var(--navy-700));
-  color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:var(--text-sm); flex-shrink:0;
+  width:36px; height:28px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
 }
+.avatar-badge img{width:100%; height:100%; object-fit:contain;}
 .eyebrow{font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--teal-600); font-weight:700;}
 .title{font-size:var(--text-md); font-weight:700; color:var(--navy-700);}
 .sidebar .eyebrow{color:rgba(255,255,255,.55);}
