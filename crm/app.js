@@ -2594,7 +2594,7 @@ function searchTableHtml(rows) {
         return `<tr>
           <td>${escapeHtml(r.name || '—')}</td>
           <td>${r.business_id
-            ? `<a class="source-link" href="https://avoindata.prh.fi/opendata-ytj-api/v3/companies?businessId=${encodeURIComponent(r.business_id)}" target="_blank" rel="noopener" title="Avaa lähde (PRH-data) uuteen välilehteen">${escapeHtml(r.business_id)} ↗</a>`
+            ? `<a class="source-link" href="https://tietopalvelu.ytj.fi/yritys/${encodeURIComponent(r.business_id)}" target="_blank" rel="noopener" title="Avaa yrityksen tiedot YTJ:n virallisella tietopalvelusivulla">${escapeHtml(r.business_id)} ↗</a>`
             : '—'}</td>
           <td>${escapeHtml(city)}</td>
           <td>${escapeHtml(r.main_business_line || '—')}</td>
