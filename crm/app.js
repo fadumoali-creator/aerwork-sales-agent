@@ -2593,7 +2593,9 @@ function searchTableHtml(rows) {
         const city = resolvePrhCity(address) || '—';
         return `<tr>
           <td>${escapeHtml(r.name || '—')}</td>
-          <td>${escapeHtml(r.business_id || '—')}</td>
+          <td>${r.business_id
+            ? `<a class="source-link" href="https://avoindata.prh.fi/opendata-ytj-api/v3/companies?businessId=${encodeURIComponent(r.business_id)}" target="_blank" rel="noopener" title="Avaa lähde (PRH-data) uuteen välilehteen">${escapeHtml(r.business_id)} ↗</a>`
+            : '—'}</td>
           <td>${escapeHtml(city)}</td>
           <td>${escapeHtml(r.main_business_line || '—')}</td>
           <td>${r.in_crm ? '<span class="status-pill won">Jo CRM:ssä</span>' : '<span class="status-pill neutral">Ei CRM:ssä</span>'}</td>
