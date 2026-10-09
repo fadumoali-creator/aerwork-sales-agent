@@ -1038,3 +1038,6 @@ Hoiwa- tai AerWork-yhteyttä.
 *Tämä dokumentti on suunnitteluluonnos. Kaikki **[E]**-merkinnät ovat muutettavissa ilman, että
 rakenne hajoaa; kaikki **[T]**-merkinnät on ratkaistava ennen kuin vastaavaa toiminnallisuutta
 myydään tai otetaan tuotantokäyttöön.*
+
+**Toteutusvälineet:** jos MVP rakennetaan Lovablella, kytkentä, työnjako ja valmiit promptit ovat
+dokumentissa [`lovable-toteutus.md`](./lovable-toteutus.md).
